@@ -1,0 +1,22 @@
+{
+  "_comment": "Example config for python main.py --config participant_config.json",
+  "output_dir": "./results",
+  "apply_filter": false,
+  "interruptions_csv": "",
+  "participants": [
+    {
+      "participant_id": "sub_01",
+      "st_trc": "/path/to/sub01_ST_m_person00.trc",
+      "dt_trc": "/path/to/sub01_DT_m_person00.trc",
+      "height_m": 1.72,
+      "fps": 120
+    },
+    {
+      "participant_id": "sub_02",
+      "st_trc": "/path/to/sub02_ST_m_person00.trc",
+      "dt_trc": "/path/to/sub02_DT_m_person00.trc",
+      "height_m": 1.68,
+      "fps": 120
+    }
+  ]
+}
