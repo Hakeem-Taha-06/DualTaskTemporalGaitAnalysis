@@ -137,6 +137,7 @@ class PipelineRunner(QThread):
         self._stages = self._build_stage_graph()
         self._results: dict = {}
         self._detected_fps: dict[str, float] = {}  # per-condition fps from TRC header
+        self._annotated_videos: dict[str, str] = {}  # per-condition annotated video paths
 
     # ------------------------------------------------------------------
     # Stage graph construction
@@ -245,10 +246,14 @@ class PipelineRunner(QThread):
 
         # ── Sports2D ──────────────────────────────────────────────────
         if name == "sports2d_st":
-            return self._run_sports2d(self.st_input, out, "st")
+            s2d = self._run_sports2d(self.st_input, out, "st")
+            self._annotated_videos["st"] = s2d.get("video", "")
+            return s2d
 
         if name == "sports2d_dt":
-            return self._run_sports2d(self.dt_input, out, "dt")
+            s2d = self._run_sports2d(self.dt_input, out, "dt")
+            self._annotated_videos["dt"] = s2d.get("video", "")
+            return s2d
 
         # ── Load ──────────────────────────────────────────────────────
         if name == "load_st":
@@ -378,27 +383,23 @@ class PipelineRunner(QThread):
         if cond == "st":
             if not self.st_is_video:
                 return self.st_input
-            # Sports2D output dir
-            return str(self._results.get("sports2d_st", self.st_input))
+            s2d = self._results.get("sports2d_st", {})
+            return s2d["trc"] if isinstance(s2d, dict) else str(s2d)
         else:
             if not self.dt_is_video:
                 return self.dt_input
-            return str(self._results.get("sports2d_dt", self.dt_input))
+            s2d = self._results.get("sports2d_dt", {})
+            return s2d["trc"] if isinstance(s2d, dict) else str(s2d)
 
     def _get_fps(self, cond: str) -> float:
         """Return the fps detected from the TRC header, falling back to UI value."""
         return self._detected_fps.get(cond, self.fps)
 
-    def _run_sports2d(self, video_path: str, out_dir: Path, cond: str) -> str:
+    def _run_sports2d(self, video_path: str, out_dir: Path, cond: str) -> dict:
         """
         Run Sports2D as a subprocess on a video file.
-        Returns the path to the generated _m_person00.trc file.
-        (Addendum 2 — Video Input Option)
-
-        Command:
-            sports2d --video_input <path> --save_pose true
-                     --calculate_angles false --to_meters true
-                     --first_person_height <h> --result_dir <dir>
+        Returns a dict with 'trc' (path to TRC) and 'video' (path to
+        annotated video, or empty string if not found).
         """
         session_dir = out_dir / f"sports2d_{cond}"
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -422,7 +423,7 @@ class PipelineRunner(QThread):
             "--to_meters",            "true",
             "--first_person_height",  str(self.height_m),
             "--result_dir",           str(session_dir),
-            "--save_vid",             "false",
+            "--save_vid",             "true",
             "--save_img",             "false",
             # Automate: detect 1 person, auto-select largest, no UI popups
             "--nb_persons_to_detect", "1",
@@ -469,7 +470,17 @@ class PipelineRunner(QThread):
                 f"after running Sports2D on {video_path}.\n"
                 f"Full log saved to: {log_file}"
             )
-        return str(trc_files[0])
+
+        # Find annotated video (Sports2D saves as *_person00.mp4 or similar)
+        vid_exts = ("*.mp4", "*.avi", "*.mov", "*.mkv")
+        vid_files = []
+        for ext in vid_exts:
+            vid_files.extend(session_dir.rglob(ext))
+        # Filter to annotated videos (contain 'person' in name, not the original)
+        annotated = [v for v in vid_files if "person" in v.stem]
+        video_path_out = str(annotated[0]) if annotated else ""
+
+        return {"trc": str(trc_files[0]), "video": video_path_out}
 
     # ------------------------------------------------------------------
     # Public helpers for UI (Addendum 2 checklist)
@@ -488,3 +499,7 @@ class PipelineRunner(QThread):
             "dtc",
         ]
         return [(n, self._stages[n].status) for n in order]
+
+    def get_annotated_video(self, cond: str) -> str:
+        """Return path to the annotated video for 'st' or 'dt', or ''."""
+        return self._annotated_videos.get(cond, "")

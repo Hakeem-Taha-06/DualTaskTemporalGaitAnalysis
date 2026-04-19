@@ -166,7 +166,7 @@ For each condition, you can provide:
 
 #### Output Directory
 
-Where result CSV files and logs will be saved. Default: `~/gait_results`. A subdirectory named after the participant ID will be created automatically.
+Where result CSV files and logs will be saved. Default: `./out`. A subdirectory named after the participant ID will be created automatically.
 
 #### Run Analysis
 
@@ -186,7 +186,14 @@ After the pipeline completes, results are displayed across five tabs:
 
 #### 📽 Annotated Video
 
-Placeholder for annotated video playback. Currently displays a message; future versions may embed the Sports2D annotated output.
+When video input is used, Sports2D generates an annotated video with pose overlays. This tab provides embedded playback with:
+
+- **Condition selector** — Switch between ST and DT annotated videos.
+- **Play/Pause** button.
+- **Seek slider** with timestamp display.
+- If videos were not generated (i.e., TRC files were provided directly), a message is shown instead.
+
+> **Note:** Video playback requires `QtMultimedia`. If not available, the video file path is displayed for opening in an external player.
 
 #### 🦶 ST Parameters
 
@@ -347,7 +354,7 @@ When video input is used, a `sports2d_st/` or `sports2d_dt/` subdirectory contai
 | Input type | `.trc file` | Toggle between TRC and video input |
 | Height (m) | `1.70` | Participant height for Sports2D scaling |
 | FPS | `120` | Fallback frame rate (auto-detected from TRC header) |
-| Output directory | `~/gait_results` | Root directory for all outputs |
+| Output directory | `./out` | Root directory for all outputs |
 
 ### JSON Config (CLI Only)
 
