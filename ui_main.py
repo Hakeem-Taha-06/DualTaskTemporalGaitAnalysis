@@ -42,6 +42,20 @@ except ImportError:
     )
     BACKEND = "PyQt6"
 
+# Qt Multimedia for video playback
+try:
+    if BACKEND == "PySide6":
+        from PySide6.QtMultimediaWidgets import QVideoWidget
+        from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+        from PySide6.QtCore import QUrl
+    else:
+        from PyQt6.QtMultimediaWidgets import QVideoWidget
+        from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+        from PyQt6.QtCore import QUrl
+    HAS_MULTIMEDIA = True
+except ImportError:
+    HAS_MULTIMEDIA = False
+
 # Attempt pyqtgraph; fall back to matplotlib if unavailable
 try:
     import pyqtgraph as pg
@@ -220,7 +234,7 @@ class InputPanel(QWidget):
         grp_out = QGroupBox("Output")
         lay_out = QVBoxLayout(grp_out)
         row_out = QHBoxLayout()
-        self.out_edit = QLineEdit(str(Path.home() / "gait_results"))
+        self.out_edit = QLineEdit(str(Path(".").resolve() / "out"))
         row_out.addWidget(self.out_edit)
         btn_out = QPushButton("…")
         btn_out.setFixedWidth(30)
@@ -582,19 +596,142 @@ class RawDataTab(QWidget):
 
 
 class VideoTab(QWidget):
-    """Placeholder for annotated video playback (shown if video path provided)."""
+    """Tab for playing back the Sports2D annotated video."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._video_paths: dict[str, str] = {}  # {"st": path, "dt": path}
+
         lay = QVBoxLayout(self)
-        self._label = QLabel(
-            "No video loaded.\n\n"
-            "Provide a video path in the left panel and run the pipeline.\n"
-            "Keypoint overlays will be shown here when available."
-        )
-        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._label.setStyleSheet(f"color: {C_MUTED}; font-size: 13px;")
-        lay.addWidget(self._label)
+        lay.setContentsMargins(8, 8, 8, 8)
+
+        # Top bar: condition selector + controls
+        top_bar = QHBoxLayout()
+        top_bar.addWidget(QLabel("Condition:"))
+        self._cond_combo = QComboBox()
+        self._cond_combo.addItems(["Single-Task (ST)", "Dual-Task (DT)"])
+        self._cond_combo.currentIndexChanged.connect(self._on_condition_changed)
+        self._cond_combo.setFixedWidth(180)
+        top_bar.addWidget(self._cond_combo)
+        top_bar.addStretch()
+
+        self._play_btn = QPushButton("Play")
+        self._play_btn.setFixedWidth(80)
+        self._play_btn.clicked.connect(self._toggle_play)
+        top_bar.addWidget(self._play_btn)
+        lay.addLayout(top_bar)
+
+        # Video area
+        if HAS_MULTIMEDIA:
+            self._video_widget = QVideoWidget()
+            self._video_widget.setStyleSheet(f"background: {C_BG};")
+            self._player = QMediaPlayer()
+            self._audio = QAudioOutput()
+            self._player.setAudioOutput(self._audio)
+            self._player.setVideoOutput(self._video_widget)
+            self._player.playbackStateChanged.connect(self._on_state_changed)
+            lay.addWidget(self._video_widget, stretch=1)
+
+            # Seek slider
+            try:
+                if BACKEND == "PySide6":
+                    from PySide6.QtWidgets import QSlider
+                else:
+                    from PyQt6.QtWidgets import QSlider
+            except ImportError:
+                QSlider = None
+
+            if QSlider:
+                seek_bar = QHBoxLayout()
+                self._slider = QSlider(Qt.Orientation.Horizontal)
+                self._slider.setRange(0, 0)
+                self._slider.sliderMoved.connect(self._seek)
+                self._player.positionChanged.connect(self._update_slider_pos)
+                self._player.durationChanged.connect(
+                    lambda d: self._slider.setRange(0, d)
+                )
+                self._time_label = QLabel("0:00 / 0:00")
+                self._time_label.setStyleSheet(f"color: {C_MUTED}; font-family: monospace;")
+                self._time_label.setFixedWidth(120)
+                seek_bar.addWidget(self._slider)
+                seek_bar.addWidget(self._time_label)
+                lay.addLayout(seek_bar)
+        else:
+            self._player = None
+            self._placeholder = QLabel(
+                "Video playback requires QtMultimedia.\n\n"
+                "Install with: pip install PySide6-Addons\n\n"
+                "The video file path will be shown below when available."
+            )
+            self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._placeholder.setStyleSheet(f"color: {C_MUTED}; font-size: 13px;")
+            lay.addWidget(self._placeholder, stretch=1)
+
+        self._path_label = QLabel("")
+        self._path_label.setStyleSheet(f"color: {C_MUTED}; font-size: 10px;")
+        self._path_label.setWordWrap(True)
+        lay.addWidget(self._path_label)
+
+    def load_videos(self, st_path: str = "", dt_path: str = ""):
+        """Set the annotated video paths and load the ST video."""
+        self._video_paths = {"st": st_path or "", "dt": dt_path or ""}
+        self._load_video_for_condition(0)  # load ST by default
+
+    def _on_condition_changed(self, index: int):
+        self._load_video_for_condition(index)
+
+    def _load_video_for_condition(self, index: int):
+        cond = "st" if index == 0 else "dt"
+        path = self._video_paths.get(cond, "")
+
+        if not path or not Path(path).exists():
+            self._path_label.setText(
+                f"No annotated video available for {cond.upper()}.\n"
+                "Run the pipeline with video input to generate one."
+            )
+            if self._player:
+                self._player.stop()
+                self._player.setSource(QUrl())
+            return
+
+        self._path_label.setText(f"Video: {path}")
+        if self._player:
+            self._player.setSource(QUrl.fromLocalFile(path))
+            self._player.play()
+
+    def _toggle_play(self):
+        if not self._player:
+            return
+        if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self._player.pause()
+        else:
+            self._player.play()
+
+    def _on_state_changed(self, state):
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self._play_btn.setText("Pause")
+        else:
+            self._play_btn.setText("Play")
+
+    def _seek(self, position: int):
+        if self._player:
+            self._player.setPosition(position)
+
+    def _update_slider_pos(self, position: int):
+        if hasattr(self, "_slider"):
+            self._slider.blockSignals(True)
+            self._slider.setValue(position)
+            self._slider.blockSignals(False)
+            # Update time label
+            dur = self._player.duration() if self._player else 0
+            self._time_label.setText(
+                f"{self._fmt_time(position)} / {self._fmt_time(dur)}"
+            )
+
+    @staticmethod
+    def _fmt_time(ms: int) -> str:
+        s = ms // 1000
+        return f"{s // 60}:{s % 60:02d}"
 
 
 # ---------------------------------------------------------------------------
@@ -696,7 +833,17 @@ class MainWindow(QMainWindow):
                 results.get("calc_params_dt"),
             )
 
-            self._tabs.setCurrentIndex(3)  # jump to DTC tab
+            # Load annotated videos if available
+            if self._runner:
+                st_vid = self._runner.get_annotated_video("st")
+                dt_vid = self._runner.get_annotated_video("dt")
+                if st_vid or dt_vid:
+                    self._video_tab.load_videos(st_path=st_vid, dt_path=dt_vid)
+                    self._tabs.setCurrentIndex(0)  # jump to video tab
+                else:
+                    self._tabs.setCurrentIndex(3)  # jump to DTC tab
+            else:
+                self._tabs.setCurrentIndex(3)
         except Exception as e:
             QMessageBox.warning(self, "Display Error", str(e))
 
