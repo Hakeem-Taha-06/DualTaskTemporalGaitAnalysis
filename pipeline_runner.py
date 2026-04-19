@@ -471,13 +471,16 @@ class PipelineRunner(QThread):
                 f"Full log saved to: {log_file}"
             )
 
-        # Find annotated video (Sports2D saves as *_person00.mp4 or similar)
+        # Find annotated video produced by Sports2D.
+        # Sports2D saves annotated videos as <name>_Sports2D.mp4 inside the
+        # result subdirectory (e.g., single_task_Sports2D/single_task_Sports2D.mp4).
         vid_exts = ("*.mp4", "*.avi", "*.mov", "*.mkv")
         vid_files = []
         for ext in vid_exts:
             vid_files.extend(session_dir.rglob(ext))
-        # Filter to annotated videos (contain 'person' in name, not the original)
-        annotated = [v for v in vid_files if "person" in v.stem]
+        # Exclude the original input video (if it was copied into the dir)
+        input_name = Path(video_path).name
+        annotated = [v for v in vid_files if v.name != input_name]
         video_path_out = str(annotated[0]) if annotated else ""
 
         return {"trc": str(trc_files[0]), "video": video_path_out}
