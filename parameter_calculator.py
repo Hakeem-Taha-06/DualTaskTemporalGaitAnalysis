@@ -71,7 +71,10 @@ from scipy import stats
 _ANGLE_CHANGE_THRESHOLD   = 0.2   # line 128  (not used in video domain)
 _STRIDE_LENGTH_MIN        = 0.2   # line 129  metres
 _STRIDE_TIME_MAX          = 2.0   # line 130  seconds
-_STANCE_RATIO_MIN         = 0.5   # line 131  dimensionless
+_STANCE_RATIO_MIN         = 0.3   # line 131  dimensionless
+                                   # DUO-GAIT uses 0.5 for IMU data; lowered
+                                   # for video domain where 30fps timing noise
+                                   # yields ratios of 0.35-0.45 for valid strides
 _Z_SCORE_THRESHOLD        = 3     # line 172
 
 
@@ -222,7 +225,12 @@ def _flag_outliers(df: pd.DataFrame, side: str) -> pd.DataFrame:
     df["turning_step"] = False
 
     # -- NaN check (line 123) --
-    df.loc[df.isna().any(axis=1), "is_outlier"] = True
+    # Only check core parameters for NaN; step_time and double_support_time
+    # are intentionally NaN at this stage (filled later as cross-foot params)
+    _core_cols = ["stride_lengths", "stride_times", "swing_times",
+                  "stance_times", "stance_ratios"]
+    core_cols_present = [c for c in _core_cols if c in df.columns]
+    df.loc[df[core_cols_present].isna().any(axis=1), "is_outlier"] = True
 
     # -- Threshold-based outliers (lines 127-139) --
     # Note: angle_change check (> 0.2) skipped here — handled by outlier_remover
@@ -297,6 +305,11 @@ def _align_events(
     stride has exactly one FO between its bounding ICs.
     Replicates gait_parameters.py adjust_data() (lines 22-64) in the video
     domain where events are frame indices rather than IMU sample numbers.
+
+    FO selection: within each (IC[i], IC[i+1]) interval, the **LAST** FO is
+    chosen.  In normal gait the sequence is IC → stance → FO → swing → IC,
+    so the FO naturally occurs late in the stride cycle.  Picking the first
+    FO would select spurious toe-Y minima right after heel-strike.
     """
     if len(ic_times) == 0 or len(fo_times) == 0:
         return ic_times, fo_times, ic_samples, fo_samples
@@ -316,36 +329,38 @@ def _align_events(
 
     # ------------------------------------------------------------------
     # Select exactly one FO per IC interval.
-    # For each consecutive IC pair (IC[i], IC[i+1]), keep only the FIRST
-    # FO that falls within that interval.  Discard IC pairs that contain
-    # no FO.
+    # For each consecutive IC pair (IC[i], IC[i+1]), keep only the LAST
+    # FO that falls within that interval.  This is physiologically
+    # correct: FO (toe-off) naturally occurs late in the stance phase,
+    # just before swing begins.
     # ------------------------------------------------------------------
     kept_ic_times:   list[float] = []
     kept_ic_samples: list[int]   = []
     kept_fo_times:   list[float] = []
     kept_fo_samples: list[int]   = []
 
-    fo_ptr = 0  # pointer into fo_times
     for i in range(len(ic_times) - 1):
         t_start = ic_times[i]
         t_end   = ic_times[i + 1]
 
-        # Advance fo_ptr past any FOs before this interval
-        while fo_ptr < len(fo_times) and fo_times[fo_ptr] <= t_start:
-            fo_ptr += 1
+        # Collect all FOs within (t_start, t_end)
+        fos_in_interval = [
+            (fo_times[j], fo_samples[j])
+            for j in range(len(fo_times))
+            if t_start < fo_times[j] < t_end
+        ]
 
-        # Find first FO within (t_start, t_end)
-        if fo_ptr < len(fo_times) and fo_times[fo_ptr] < t_end:
+        if fos_in_interval:
+            # Pick the LAST FO in the interval (closest to next IC = end of stance)
+            best_fo_t, best_fo_s = fos_in_interval[-1]
             kept_ic_times.append(t_start)
             kept_ic_samples.append(ic_samples[i])
-            kept_fo_times.append(fo_times[fo_ptr])
-            kept_fo_samples.append(fo_samples[fo_ptr])
-            fo_ptr += 1  # consume this FO
+            kept_fo_times.append(best_fo_t)
+            kept_fo_samples.append(best_fo_s)
         # else: skip this IC pair (no valid FO in the interval)
 
     # Add the final IC that closes the last stride
     if kept_fo_times:
-        # Find the IC that follows the last kept FO
         last_fo_t = kept_fo_times[-1]
         for i in range(len(ic_times)):
             if ic_times[i] > last_fo_t:

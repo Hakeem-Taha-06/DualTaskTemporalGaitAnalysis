@@ -95,14 +95,16 @@ def run_participant(
     for cond, trc_path in [("st", st_trc), ("dt", dt_trc)]:
         _emit(f"Loading trajectories ({cond.upper()})", 5 if cond == "st" else 10)
 
-        traj = input_loader.load_trc(trc_path, fps=fps)
+        traj, detected_fps = input_loader.load_trc(trc_path, fps=fps)
+        cond_fps = detected_fps  # use fps from TRC header
         traj.to_csv(out_dir / f"01_raw_trajectories_{cond}.csv", index=False)
         results[f"load_{cond}"] = traj
+        results[f"fps_{cond}"] = cond_fps
 
         _emit(f"Preprocessing ({cond.upper()})", 15 if cond == "st" else 20,
               "no-op (Sports2D pre-filters)" if not apply_filter else "Butterworth 6 Hz")
 
-        traj_pre = preprocessor.preprocess(traj, fps=fps, apply_filter=apply_filter)
+        traj_pre = preprocessor.preprocess(traj, fps=cond_fps, apply_filter=apply_filter)
         results[f"preprocess_{cond}"] = traj_pre
 
     # ------------------------------------------------------------------ #
@@ -111,8 +113,9 @@ def run_participant(
     for cond in ("st", "dt"):
         _emit(f"Detecting gait events ({cond.upper()})", 30 if cond == "st" else 35)
 
+        cond_fps  = results[f"fps_{cond}"]
         traj_pre  = results[f"preprocess_{cond}"]
-        events_df = event_detector.detect_events(traj_pre, fps=fps)
+        events_df = event_detector.detect_events(traj_pre, fps=cond_fps)
         events_df.to_csv(out_dir / f"02_events_{cond}.csv", index=False)
         results[f"detect_events_{cond}"] = events_df
 

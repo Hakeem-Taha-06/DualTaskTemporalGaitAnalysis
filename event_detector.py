@@ -59,8 +59,9 @@ from scipy.signal import find_peaks
 _IC_PROMINENCE_M = 0.005
 
 # Minimum vertical prominence (metres) for a toe-Y local minimum to count as FO.
-# NOT FOUND IN DUO-GAIT SOURCE (domain-translated) — ASSUMPTION: 0.005 m
-_FO_PROMINENCE_M = 0.005
+# Toe-Y has more noise than heel-Y, so a higher threshold is needed.
+# NOT FOUND IN DUO-GAIT SOURCE (domain-translated) — ASSUMPTION: 0.008 m
+_FO_PROMINENCE_M = 0.008
 
 # Minimum number of frames between successive IC events of the same foot.
 # At 120 fps, a stride shorter than 0.5 s (60 frames) is physiologically
@@ -69,7 +70,8 @@ _FO_PROMINENCE_M = 0.005
 _MIN_IC_DISTANCE_FRAMES = 40  # ~0.33 s @ 120 fps
 
 # Minimum frames between successive FO events
-_MIN_FO_DISTANCE_FRAMES = 40
+# Higher than IC distance because FO noise is more prevalent in video data
+_MIN_FO_DISTANCE_FRAMES = 60  # ~0.5 s @ 120 fps
 
 
 def detect_events(traj_df: pd.DataFrame, fps: float = 120.0) -> pd.DataFrame:

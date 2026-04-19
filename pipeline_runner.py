@@ -136,6 +136,7 @@ class PipelineRunner(QThread):
 
         self._stages = self._build_stage_graph()
         self._results: dict = {}
+        self._detected_fps: dict[str, float] = {}  # per-condition fps from TRC header
 
     # ------------------------------------------------------------------
     # Stage graph construction
@@ -252,27 +253,29 @@ class PipelineRunner(QThread):
         # ── Load ──────────────────────────────────────────────────────
         if name == "load_st":
             trc = self._resolve_trc("st")
-            df  = input_loader.load_trc(trc, fps=self.fps)
+            df, detected_fps = input_loader.load_trc(trc, fps=self.fps)
+            self._detected_fps["st"] = detected_fps
             df.to_csv(out / "01_raw_trajectories_st.csv", index=False)
             return df
 
         if name == "load_dt":
             trc = self._resolve_trc("dt")
-            df  = input_loader.load_trc(trc, fps=self.fps)
+            df, detected_fps = input_loader.load_trc(trc, fps=self.fps)
+            self._detected_fps["dt"] = detected_fps
             df.to_csv(out / "01_raw_trajectories_dt.csv", index=False)
             return df
 
         # ── Preprocess ────────────────────────────────────────────────
         if name == "preprocess_st":
             df = preprocessor.preprocess(
-                self._results["load_st"], fps=self.fps,
+                self._results["load_st"], fps=self._get_fps("st"),
                 apply_filter=self.apply_filter
             )
             return df
 
         if name == "preprocess_dt":
             df = preprocessor.preprocess(
-                self._results["load_dt"], fps=self.fps,
+                self._results["load_dt"], fps=self._get_fps("dt"),
                 apply_filter=self.apply_filter
             )
             return df
@@ -280,14 +283,14 @@ class PipelineRunner(QThread):
         # ── Event detection ───────────────────────────────────────────
         if name == "detect_events_st":
             df = event_detector.detect_events(
-                self._results["preprocess_st"], fps=self.fps
+                self._results["preprocess_st"], fps=self._get_fps("st")
             )
             df.to_csv(out / "02_events_st.csv", index=False)
             return df
 
         if name == "detect_events_dt":
             df = event_detector.detect_events(
-                self._results["preprocess_dt"], fps=self.fps
+                self._results["preprocess_dt"], fps=self._get_fps("dt")
             )
             df.to_csv(out / "02_events_dt.csv", index=False)
             return df
@@ -382,6 +385,10 @@ class PipelineRunner(QThread):
                 return self.dt_input
             return str(self._results.get("sports2d_dt", self.dt_input))
 
+    def _get_fps(self, cond: str) -> float:
+        """Return the fps detected from the TRC header, falling back to UI value."""
+        return self._detected_fps.get(cond, self.fps)
+
     def _run_sports2d(self, video_path: str, out_dir: Path, cond: str) -> str:
         """
         Run Sports2D as a subprocess on a video file.
@@ -410,13 +417,18 @@ class PipelineRunner(QThread):
 
         cmd = [
             str(sports2d_exe),
-            "--video_input",        video_path,
-            "--save_pose",          "true",
-            "--to_meters",          "true",
-            "--first_person_height", str(self.height_m),
-            "--result_dir",         str(session_dir),
-            "--save_vid",           "false",
-            "--save_img",           "false",
+            "--video_input",          video_path,
+            "--save_pose",            "true",
+            "--to_meters",            "true",
+            "--first_person_height",  str(self.height_m),
+            "--result_dir",           str(session_dir),
+            "--save_vid",             "false",
+            "--save_img",             "false",
+            # Automate: detect 1 person, auto-select largest, no UI popups
+            "--nb_persons_to_detect", "1",
+            "--person_ordering_method", "largest_size",
+            "--show_realtime_results", "false",
+            "--show_graphs",          "false",
         ]
 
         proc = subprocess.run(
