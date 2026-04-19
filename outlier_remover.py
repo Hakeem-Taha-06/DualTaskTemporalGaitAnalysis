@@ -193,7 +193,8 @@ def _mark_turning_interval(df: pd.DataFrame, interval_size: int) -> pd.DataFrame
     For each turning_step at index x, marks indices
     [x - interval_size, …, x + interval_size] as turning_interval.
     Also marks the first and last interval_size strides of the session
-    (line 45-46 in DUO-GAIT).
+    (line 45-46 in DUO-GAIT), BUT only when there are enough strides
+    that this won't eliminate all data.
     Applied per foot (DUO-GAIT processes each foot's CSV independently).
     """
     for side in ("left", "right"):
@@ -201,6 +202,8 @@ def _mark_turning_interval(df: pd.DataFrame, interval_size: int) -> pd.DataFrame
         sub_idx = df.index[mask].tolist()      # positional indices within df
         if not sub_idx:
             continue
+
+        n_strides = len(sub_idx)
 
         # Positions of turning steps within this foot's stride list
         ts_positions = [
@@ -216,14 +219,20 @@ def _mark_turning_interval(df: pd.DataFrame, interval_size: int) -> pd.DataFrame
             )
 
         # Clip to valid range (lines 37-39)
-        all_positions = set(range(len(sub_idx)))
+        all_positions = set(range(n_strides))
         turning_positions &= all_positions
 
         # Head and tail strides (lines 45-46)
-        head_tail = list(range(interval_size)) + list(
-            range(len(sub_idx) - interval_size, len(sub_idx))
-        )
-        turning_positions.update(p for p in head_tail if p in all_positions)
+        # Skip this for short recordings where it would remove too much data.
+        # DUO-GAIT was designed for 200+ stride walk tests; for short videos
+        # with few strides per foot, trimming head/tail would eliminate most
+        # or all data.  Only apply when we have enough strides that removing
+        # 2×interval_size leaves at least half the data.
+        if n_strides > 4 * interval_size:
+            head_tail = list(range(interval_size)) + list(
+                range(n_strides - interval_size, n_strides)
+            )
+            turning_positions.update(p for p in head_tail if p in all_positions)
 
         for pos in turning_positions:
             df.at[sub_idx[pos], "turning_interval"] = True

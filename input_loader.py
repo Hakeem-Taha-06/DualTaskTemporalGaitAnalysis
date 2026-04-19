@@ -58,9 +58,10 @@ _REQUIRED_KEYPOINTS = [_KPT_LEFT_HEEL, _KPT_RIGHT_HEEL,
 _OPTIONAL_KEYPOINTS = [_KPT_LEFT_ANK, _KPT_RIGHT_ANK]
 
 
-def load_trc(trc_path: str | Path, fps: float = 120.0) -> pd.DataFrame:
+def load_trc(trc_path: str | Path, fps: float = 120.0) -> tuple[pd.DataFrame, float]:
     """
-    Parse a Sports2D .trc file and return the standardised trajectory DataFrame.
+    Parse a Sports2D .trc file and return the standardised trajectory DataFrame
+    along with the detected frame rate.
 
     Parameters
     ----------
@@ -74,13 +75,16 @@ def load_trc(trc_path: str | Path, fps: float = 120.0) -> pd.DataFrame:
 
     Returns
     -------
-    pd.DataFrame
-        Columns: frame, time_s,
+    tuple[pd.DataFrame, float]
+        A tuple of (trajectory_df, detected_fps).
+        trajectory_df columns: frame, time_s,
                  left_heel_x, left_heel_y,
                  right_heel_x, right_heel_y,
                  left_toe_x, left_toe_y,
                  right_toe_x, right_toe_y
         (plus ankle columns if present in the file)
+        detected_fps: the frame rate read from the TRC header (or the
+                 fallback value if the header could not be parsed).
 
     Raises
     ------
@@ -233,7 +237,7 @@ def load_trc(trc_path: str | Path, fps: float = 120.0) -> pd.DataFrame:
             out[f"{side}_ankle_y"] = kpt_data[kpt_name][1].values
 
     out.reset_index(drop=True, inplace=True)
-    return out
+    return out, fps_from_header
 
 
 # ---------------------------------------------------------------------------
