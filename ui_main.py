@@ -725,6 +725,27 @@ class VideoTab(QWidget):
         self._path_label.setWordWrap(True)
         lay.addWidget(self._path_label)
 
+        # Sports2D progress bar — shown only while pipeline is running
+        self._s2d_label = QLabel("")
+        self._s2d_label.setStyleSheet(f"color: {C_ACCENT}; font-size: 11px;")
+        self._s2d_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self._s2d_label)
+
+        self._s2d_bar = QProgressBar()
+        self._s2d_bar.setRange(0, 100)
+        self._s2d_bar.setValue(0)
+        self._s2d_bar.setTextVisible(False)
+        self._s2d_bar.setFixedHeight(8)
+        self._s2d_bar.setStyleSheet(
+            f"QProgressBar {{ background: {C_SURFACE}; border-radius: 4px; }}"
+            f"QProgressBar::chunk {{ background: {C_ACCENT}; border-radius: 4px; }}"
+        )
+        lay.addWidget(self._s2d_bar)
+
+        # Hidden initially
+        self._s2d_bar.setVisible(False)
+        self._s2d_label.setVisible(False)
+
     def load_videos(self, st_path: str = "", dt_path: str = ""):
         """Set the annotated video paths and load the ST video."""
         self._video_paths = {"st": st_path or "", "dt": dt_path or ""}
@@ -763,6 +784,7 @@ class VideoTab(QWidget):
     def _on_state_changed(self, state):
         if state == QMediaPlayer.PlaybackState.PlayingState:
             self._play_btn.setText("Pause")
+            self.hide_s2d_progress()   # hide progress bar while video plays
         else:
             self._play_btn.setText("Play")
 
@@ -785,6 +807,27 @@ class VideoTab(QWidget):
     def _fmt_time(ms: int) -> str:
         s = ms // 1000
         return f"{s // 60}:{s % 60:02d}"
+
+    # ------------------------------------------------------------------
+    # Sports2D progress bar
+    # ------------------------------------------------------------------
+
+    def show_s2d_progress(self, cond: str, pct: int, fps: float, eta: str):
+        """Update the Sports2D progress bar with live tqdm data."""
+        self._s2d_bar.setVisible(True)
+        self._s2d_label.setVisible(True)
+        self._s2d_bar.setValue(pct)
+        label = f"Processing {cond.upper()} — {pct}%"
+        if fps > 0:
+            label += f"  |  {fps:.1f} it/s"
+        if eta:
+            label += f"  |  ETA {eta}"
+        self._s2d_label.setText(label)
+
+    def hide_s2d_progress(self):
+        """Hide the Sports2D progress bar (finished or video playing)."""
+        self._s2d_bar.setVisible(False)
+        self._s2d_label.setVisible(False)
 
 
 # ---------------------------------------------------------------------------
@@ -861,16 +904,23 @@ class MainWindow(QMainWindow):
         self._runner.progress.connect(self._on_progress)
         self._runner.finished.connect(self._on_finished)
         self._runner.error.connect(self._on_error)
+        self._runner.sports2d_progress.connect(self._on_s2d_progress)
         self._runner.start()
 
     @Slot(str, str, int)
     def _on_progress(self, stage_name: str, status: str, pct: int):
         self._input_panel.update_stage(stage_name, status, pct)
 
+    @Slot(str, int, float, str)
+    def _on_s2d_progress(self, cond: str, pct: int, fps: float, eta: str):
+        self._tabs.setCurrentWidget(self._video_tab)   # keep video tab in view
+        self._video_tab.show_s2d_progress(cond, pct, fps, eta)
+
     @Slot(dict)
     def _on_finished(self, results: dict):
         self._results = results
         self._input_panel.on_finished()
+        self._video_tab.hide_s2d_progress()
 
         # Populate result tabs
         try:
