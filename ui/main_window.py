@@ -67,8 +67,7 @@ except ImportError:
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
-sys.path.insert(0, str(Path(__file__).parent))
-from pipeline_runner import PipelineRunner, StageStatus, STATUS_ICON
+from runners.pipeline_runner import PipelineRunner, StageStatus, STATUS_ICON
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +154,7 @@ class InputPanel(QWidget):
     """Left panel for participant input, file browsing, and pipeline control."""
 
     run_requested = Signal(dict)   # emits config dict when user clicks Run
+    batch_run_requested = Signal(dict)  # emits config for batch mode
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -170,6 +170,15 @@ class InputPanel(QWidget):
         hdr = QLabel("Gait Analysis")
         hdr.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {C_ACCENT};")
         root.addWidget(hdr)
+
+        # ── Mode selector ─────────────────────────────────────────────
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Mode:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Single Participant", "Batch Processing"])
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        mode_row.addWidget(self.mode_combo)
+        root.addLayout(mode_row)
 
         # ── Participant ID ────────────────────────────────────────────
         grp_id = QGroupBox("Participant")
@@ -253,6 +262,25 @@ class InputPanel(QWidget):
         lay_bnd.addLayout(row_dt_bnd)
 
         root.addWidget(grp_bnd)
+
+        # Store single-mode widgets for show/hide
+        self._single_widgets = [grp_id, self.st_group, self.dt_group, grp_num, grp_bnd]
+
+        # ── Batch-mode widgets ────────────────────────────────────────
+        self._batch_group = QGroupBox("Batch Processing")
+        batch_lay = QVBoxLayout(self._batch_group)
+        batch_lay.addWidget(QLabel("Dataset Directory:"))
+        row_ds = QHBoxLayout()
+        self.dataset_dir_edit = QLineEdit()
+        self.dataset_dir_edit.setPlaceholderText("Path to dataset root folder…")
+        row_ds.addWidget(self.dataset_dir_edit)
+        btn_ds = QPushButton("…")
+        btn_ds.setFixedWidth(30)
+        btn_ds.clicked.connect(self._browse_dataset_dir)
+        row_ds.addWidget(btn_ds)
+        batch_lay.addLayout(row_ds)
+        self._batch_group.setVisible(False)
+        root.addWidget(self._batch_group)
 
         # ── Run button + progress ─────────────────────────────────────
         self.run_btn = QPushButton("▶  Run Analysis")
@@ -343,6 +371,9 @@ class InputPanel(QWidget):
             self.out_edit.setText(path)
 
     def _on_run(self):
+        if self.mode_combo.currentIndex() == 1:
+            self._on_batch_run()
+            return
         config = {
             "participant_id": self.pid_edit.text().strip() or "sub_01",
             "st_input":       getattr(self, "st_path_edit").text().strip(),
@@ -376,6 +407,39 @@ class InputPanel(QWidget):
     def on_error(self, msg: str):
         self.run_btn.setEnabled(True)
         QMessageBox.critical(self, "Pipeline Error", msg[:800])
+
+    # ------------------------------------------------------------------
+    # Batch mode helpers
+    # ------------------------------------------------------------------
+
+    def _on_mode_changed(self, index: int):
+        is_batch = index == 1
+        for w in self._single_widgets:
+            w.setVisible(not is_batch)
+        self._batch_group.setVisible(is_batch)
+
+    def _browse_dataset_dir(self):
+        path = QFileDialog.getExistingDirectory(self, "Select Dataset Directory")
+        if path:
+            self.dataset_dir_edit.setText(path)
+
+    def _on_batch_run(self):
+        dataset_dir = self.dataset_dir_edit.text().strip()
+        output_dir = self.out_edit.text().strip()
+        if not dataset_dir:
+            QMessageBox.warning(self, "Missing Input", "Please select a dataset directory.")
+            return
+        config = {"dataset_dir": dataset_dir, "output_dir": output_dir}
+        self.run_btn.setEnabled(False)
+        self.progress_bar.setValue(0)
+        self.stage_log.clear()
+        self.batch_run_requested.emit(config)
+
+    def update_batch_stage(self, pid: str, idx: int, total: int,
+                           stage: str, status: str, pct: int):
+        overall = int(((idx - 1) / total) * 100 + pct / total)
+        self.progress_bar.setValue(overall)
+        self.stage_log.append(f"[{idx}/{total}] {pid} — {stage} ({status})")
 
 
 # ---------------------------------------------------------------------------
@@ -840,6 +904,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Gait Analysis — Sports2D + DUO-GAIT")
         self.resize(1280, 820)
         self._runner: Optional[PipelineRunner] = None
+        self._batch_runner = None
         self._results: dict = {}
 
         self._build_ui()
@@ -854,6 +919,7 @@ class MainWindow(QMainWindow):
         # Left panel
         self._input_panel = InputPanel()
         self._input_panel.run_requested.connect(self._on_run_requested)
+        self._input_panel.batch_run_requested.connect(self._on_batch_run_requested)
         root.addWidget(self._input_panel)
 
         # Divider
@@ -955,6 +1021,77 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_error(self, message: str):
+        self._input_panel.on_error(message)
+
+    # ------------------------------------------------------------------
+    # Batch pipeline control
+    # ------------------------------------------------------------------
+
+    @Slot(dict)
+    def _on_batch_run_requested(self, config: dict):
+        from runners.batch_runner import BatchPipelineRunner
+        self._batch_runner = BatchPipelineRunner(
+            input_dir=config["dataset_dir"],
+            output_dir=config["output_dir"],
+        )
+        self._batch_runner.batch_progress.connect(self._on_batch_progress)
+        self._batch_runner.participant_complete.connect(self._on_participant_complete)
+        self._batch_runner.file_error.connect(self._on_batch_file_error)
+        self._batch_runner.batch_finished.connect(self._on_batch_finished)
+        self._batch_runner.batch_error.connect(self._on_batch_error)
+        self._batch_runner.sports2d_progress.connect(self._on_s2d_progress)
+        self._batch_runner.start()
+
+    @Slot(str, int, int, str, str, int)
+    def _on_batch_progress(self, pid, idx, total, stage, status, pct):
+        self._input_panel.update_batch_stage(pid, idx, total, stage, status, pct)
+
+    @Slot(str, int, int)
+    def _on_participant_complete(self, pid, idx, total):
+        self._input_panel.stage_log.append(f"\u2713 {pid} complete ({idx}/{total})")
+
+    @Slot(str, str, str)
+    def _on_batch_file_error(self, pid, folder_path, missing_files):
+        from runners.batch_runner import ErrorAction
+        msg = (f"Participant {pid} is missing files:\n{missing_files}\n\n"
+               f"Folder: {folder_path}\n\n"
+               f"Skip this participant, Retry with a different folder, or Cancel?")
+        box = QMessageBox(self)
+        box.setWindowTitle("Missing Files")
+        box.setText(msg)
+        box.setIcon(QMessageBox.Icon.Warning)
+        btn_skip   = box.addButton("Skip",   QMessageBox.ButtonRole.AcceptRole)
+        btn_retry  = box.addButton("Retry",  QMessageBox.ButtonRole.ActionRole)
+        btn_cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked == btn_cancel:
+            self._batch_runner.set_error_response(ErrorAction.CANCEL)
+        elif clicked == btn_retry:
+            new_path = QFileDialog.getExistingDirectory(
+                self, f"Select replacement folder for {pid}", folder_path
+            )
+            self._batch_runner.set_error_response(
+                ErrorAction.RETRY, retry_folder=new_path or folder_path
+            )
+        else:
+            self._batch_runner.set_error_response(ErrorAction.SKIP)
+
+    @Slot(object)
+    def _on_batch_finished(self, master_df):
+        self._input_panel.on_finished()
+        self._input_panel.stage_log.append("\n\u2713 Batch complete!")
+        if master_df is not None and not master_df.empty:
+            out_dir = self._input_panel.out_edit.text().strip()
+            QMessageBox.information(
+                self, "Batch Complete",
+                f"All participants processed.\n\n"
+                f"Master output saved to:\n{out_dir}/master/"
+            )
+
+    @Slot(str)
+    def _on_batch_error(self, message: str):
         self._input_panel.on_error(message)
 
 
