@@ -42,13 +42,13 @@ from typing import Optional
 
 import pandas as pd
 
-import input_loader
-import preprocessor
-import event_detector
-import parameter_calculator
-import outlier_remover
-import aggregator
-import dtc_calculator
+from gait import input_loader
+from gait import preprocessor
+from gait import event_detector
+from gait import parameter_calculator
+from gait import outlier_remover
+from gait import aggregator
+from gait import dtc_calculator
 
 
 # ---------------------------------------------------------------------------
@@ -256,20 +256,45 @@ def main():
         description="Gait Analysis Pipeline: Sports2D TRC → DUO-GAIT parameters"
     )
     parser.add_argument(
-        "--config", required=True,
+        "--config",
         help="Path to JSON config file (see main.py docstring for schema)"
+    )
+    parser.add_argument(
+        "--batch-dir",
+        help="Path to dataset directory for batch processing. "
+             "Each subdirectory should contain single.mp4, dual.mp4, "
+             "single.csv, dual.csv, and master.csv"
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="./out",
+        help="Output directory for batch results (default: ./out)"
     )
     args = parser.parse_args()
 
-    config_path = Path(args.config)
-    if not config_path.exists():
-        print(f"Config file not found: {config_path}")
-        sys.exit(1)
+    if args.batch_dir:
+        # Batch mode
+        from runners.batch_runner import run_batch_cli
+        batch_dir = Path(args.batch_dir)
+        if not batch_dir.exists():
+            print(f"Batch directory not found: {batch_dir}")
+            sys.exit(1)
+        run_batch_cli(batch_dir, Path(args.output_dir))
 
-    with open(config_path) as f:
-        config = json.load(f)
+    elif args.config:
+        # Single-participant / config-file mode
+        config_path = Path(args.config)
+        if not config_path.exists():
+            print(f"Config file not found: {config_path}")
+            sys.exit(1)
 
-    run_batch(config)
+        with open(config_path) as f:
+            config = json.load(f)
+
+        run_batch(config)
+
+    else:
+        parser.error("Either --config or --batch-dir is required.")
 
 
 if __name__ == "__main__":
