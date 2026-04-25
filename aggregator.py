@@ -89,16 +89,11 @@ def aggregate(
     """
     df = strides_df.copy()
 
-    # ------------------------------------------------------------------
-    # Filter out invalid strides — DUO-GAIT aggregate_gait_parameters.py:15-18
-    # ------------------------------------------------------------------
-    df = df[df["is_outlier"] != True]
-    if "turning_interval" in df.columns:
-        df = df[df["turning_interval"] != True]
-    if "interrupted" in df.columns:
-        df = df[df["interrupted"] != True]
-
-    df = df.reset_index(drop=True)
+    # Filter out strides marked as outliers (e.g. boundary strides near
+    # frame entry/exit).  When no boundaries CSV is provided, is_outlier
+    # is all False and this is a no-op.
+    if "is_outlier" in df.columns:
+        df = df[df["is_outlier"] != True].reset_index(drop=True)
 
     # ------------------------------------------------------------------
     # Add derived parameters — DUO-GAIT lines 39-40

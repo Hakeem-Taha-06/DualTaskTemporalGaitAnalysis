@@ -60,75 +60,131 @@ _TURNING_MIN_AP_DISPLACEMENT_M = 0.05
 def remove_outliers(
     strides_df: pd.DataFrame,
     traj_df: pd.DataFrame,
+    boundaries_csv: str = "",
     interruptions_df: Optional[pd.DataFrame] = None,
     interval_size: int = _TURNING_INTERVAL_SIZE,
     turning_min_ap_m: float = _TURNING_MIN_AP_DISPLACEMENT_M,
 ) -> pd.DataFrame:
     """
-    Apply DUO-GAIT outlier removal rules to the stride-level DataFrame.
+    Post-process stride data by marking boundary strides for exclusion.
+
+    Turning detection and head/tail trimming are disabled (turns happen
+    off-camera).  The only active exclusion is **boundary stride marking**:
+    the first stride after each frame entrance and the last stride before
+    each frame exit are marked ``is_outlier = True``.
 
     Parameters
     ----------
     strides_df : pd.DataFrame
         Output of parameter_calculator.calculate_parameters().
     traj_df : pd.DataFrame
-        Filtered trajectory DataFrame (output of preprocessor).
-    interruptions_df : pd.DataFrame or None
-        Optional table with columns [start_s, end_s] marking time intervals
-        where the participant was interrupted.  Mirrors DUO-GAIT
-        features/postprocessing.py:mark_interrupted_strides.
-    interval_size : int
-        Number of strides before/after each turning stride to mark as
-        turning_interval.  Default 2 — exact DUO-GAIT value.
-    turning_min_ap_m : float
-        Minimum net AP displacement (metres) for a stride NOT to be a turn.
+        Filtered trajectory (from preprocessor).  Not used currently but
+        kept for API compatibility.
+    boundaries_csv : str
+        Path to a CSV with columns ``time_s, event`` where event is
+        ``"enter"`` or ``"exit"``.  Empty string → no boundary exclusion.
+    interruptions_df, interval_size, turning_min_ap_m
+        Legacy parameters — retained for API compatibility but not used.
 
     Returns
     -------
     pd.DataFrame
-        Cleaned stride DataFrame with added columns:
-        turning_interval, interrupted, removal_reason.
-        is_outlier and turning_step columns are preserved from the input.
+        Stride DataFrame with added columns: turning_interval, interrupted,
+        removal_reason.  Boundary strides have ``is_outlier = True``.
     """
     if strides_df.empty:
         return strides_df.copy()
 
     df = strides_df.copy()
 
-    # Ensure required columns exist (may already be set by parameter_calculator)
+    # Add expected columns with default (no-exclusion) values
     if "is_outlier"   not in df.columns: df["is_outlier"]   = False
     if "turning_step" not in df.columns: df["turning_step"] = False
-
     df["turning_interval"] = False
     df["interrupted"]      = False
     df["removal_reason"]   = ""
 
     # ------------------------------------------------------------------
-    # 1. Detect turning strides from trajectory (video-domain analogue of
-    #    angle_change > 0.2 threshold in DUO-GAIT gait_parameters.py:128)
+    # Boundary stride exclusion
     # ------------------------------------------------------------------
-    df = _detect_turning_strides(df, traj_df, turning_min_ap_m)
+    if boundaries_csv:
+        df = _mark_boundary_strides(df, boundaries_csv)
 
-    # ------------------------------------------------------------------
-    # 2. Expand turning strides to turning intervals + head/tail
-    #    DUO-GAIT: features/postprocessing.py lines 20-48
-    # ------------------------------------------------------------------
-    df = _mark_turning_interval(df, interval_size)
+    # Populate removal_reason for inspection
+    df.loc[df["is_outlier"] == True, "removal_reason"] = "boundary"
 
-    # ------------------------------------------------------------------
-    # 3. Mark interrupted strides
-    #    DUO-GAIT: features/postprocessing.py lines 51-84
-    # ------------------------------------------------------------------
-    if interruptions_df is not None and not interruptions_df.empty:
-        df = _mark_interrupted_strides(df, interruptions_df)
+    return df
 
-    # ------------------------------------------------------------------
-    # 4. Populate removal_reason for inspection
-    # ------------------------------------------------------------------
-    df.loc[df["is_outlier"]       == True, "removal_reason"] += "outlier;"
-    df.loc[df["turning_interval"] == True, "removal_reason"] += "turning;"
-    df.loc[df["interrupted"]      == True, "removal_reason"] += "interrupted;"
-    df["removal_reason"] = df["removal_reason"].str.strip(";")
+
+# ---------------------------------------------------------------------------
+# Boundary stride exclusion
+# ---------------------------------------------------------------------------
+
+def _mark_boundary_strides(
+    df: pd.DataFrame,
+    csv_path: str,
+) -> pd.DataFrame:
+    """
+    Parse an enter/exit timestamp CSV and mark boundary strides.
+
+    CSV format::
+
+        time_s,event
+        0.00,enter
+        5.20,exit
+        5.80,enter
+        10.50,exit
+
+    For each ``enter`` event the **first stride starting at or after** the
+    timestamp is marked ``is_outlier = True`` (incomplete / accelerating).
+
+    For each ``exit`` event the **last stride starting at or before** the
+    timestamp is marked ``is_outlier = True`` (decelerating / incomplete).
+    """
+    from pathlib import Path
+
+    path = Path(csv_path)
+    if not path.exists() or path.stat().st_size == 0:
+        return df
+
+    try:
+        boundaries = pd.read_csv(path)
+    except Exception:
+        return df  # silently skip unparseable files
+
+    if "time_s" not in boundaries.columns or "event" not in boundaries.columns:
+        return df
+
+    def parse_time(t_val) -> float:
+        t_str = str(t_val).strip()
+        if ":" in t_str:
+            parts = t_str.split(":")
+            total_sec = 0.0
+            for part in parts:
+                total_sec = total_sec * 60 + float(part)
+            return total_sec
+        return float(t_str)
+
+    for _, row in boundaries.iterrows():
+        try:
+            time_s = parse_time(row["time_s"])
+        except ValueError:
+            continue  # Skip rows with invalid time format
+        event  = str(row["event"]).strip().lower()
+
+        if event == "enter":
+            # First stride starting at or after the entrance
+            mask = df["timestamps"] >= time_s
+            if mask.any():
+                idx = df.loc[mask, "timestamps"].idxmin()
+                df.at[idx, "is_outlier"] = True
+
+        elif event == "exit":
+            # Last stride starting at or before the exit
+            mask = df["timestamps"] <= time_s
+            if mask.any():
+                idx = df.loc[mask, "timestamps"].idxmax()
+                df.at[idx, "is_outlier"] = True
 
     return df
 

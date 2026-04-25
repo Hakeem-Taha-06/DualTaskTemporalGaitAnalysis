@@ -120,6 +120,9 @@ class PipelineRunner(QThread):
         output_dir: str = "",
         apply_filter: bool = False,
         interruptions_df: Optional[pd.DataFrame] = None,
+        st_boundaries_csv: str = "",
+        dt_boundaries_csv: str = "",
+        speed_factor: float = 1.0,
         parent=None,
     ):
         super().__init__(parent)
@@ -133,6 +136,9 @@ class PipelineRunner(QThread):
         self.output_dir       = Path(output_dir) if output_dir else Path(tempfile.mkdtemp())
         self.apply_filter     = apply_filter
         self.interruptions_df = interruptions_df
+        self.st_boundaries_csv = st_boundaries_csv
+        self.dt_boundaries_csv = dt_boundaries_csv
+        self.speed_factor      = speed_factor
 
         self._stages = self._build_stage_graph()
         self._results: dict = {}
@@ -309,6 +315,7 @@ class PipelineRunner(QThread):
             df = parameter_calculator.calculate_parameters(
                 gait_ev, self._results["preprocess_st"]
             )
+            df = self._apply_speed_factor(df)
             df.to_csv(out / "03_strides_raw_st.csv", index=False)
             return df
 
@@ -320,6 +327,7 @@ class PipelineRunner(QThread):
             df = parameter_calculator.calculate_parameters(
                 gait_ev, self._results["preprocess_dt"]
             )
+            df = self._apply_speed_factor(df)
             df.to_csv(out / "03_strides_raw_dt.csv", index=False)
             return df
 
@@ -328,7 +336,7 @@ class PipelineRunner(QThread):
             df = outlier_remover.remove_outliers(
                 self._results["calc_params_st"],
                 self._results["preprocess_st"],
-                interruptions_df=self.interruptions_df,
+                boundaries_csv=self.st_boundaries_csv,
             )
             df.to_csv(out / "04_strides_cleaned_st.csv", index=False)
             return df
@@ -337,7 +345,7 @@ class PipelineRunner(QThread):
             df = outlier_remover.remove_outliers(
                 self._results["calc_params_dt"],
                 self._results["preprocess_dt"],
-                interruptions_df=self.interruptions_df,
+                boundaries_csv=self.dt_boundaries_csv,
             )
             df.to_csv(out / "04_strides_cleaned_dt.csv", index=False)
             return df
@@ -395,11 +403,36 @@ class PipelineRunner(QThread):
         """Return the fps detected from the TRC header, falling back to UI value."""
         return self._detected_fps.get(cond, self.fps)
 
+    def _apply_speed_factor(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Correct temporal stride parameters for slow-motion / sped-up video.
+
+        A speed_factor of 8.0 means the video plays 8× slower than real-time
+        (e.g. 240fps recording played at 30fps).  All time-based columns are
+        divided by the factor so that downstream speed and cadence calculations
+        automatically reflect real-time values.
+        """
+        if self.speed_factor == 1.0 or df.empty:
+            return df
+
+        time_cols = [
+            "stride_times", "stance_times", "swing_times",
+            "step_time", "double_support_time",
+        ]
+        for col in time_cols:
+            if col in df.columns:
+                df[col] = df[col] / self.speed_factor
+
+        return df
+
     def _run_sports2d(self, video_path: str, out_dir: Path, cond: str) -> dict:
         """
         Run Sports2D as a subprocess on a video file.
         Returns a dict with 'trc' (path to TRC) and 'video' (path to
         annotated video, or empty string if not found).
+
+        Tries GPU (onnxruntime + cuda) first; if CUDA errors are detected
+        in the output, automatically retries with CPU (openvino).
         """
         session_dir = out_dir / f"sports2d_{cond}"
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -416,34 +449,79 @@ class PipelineRunner(QThread):
                 f"Install it with: pip install sports2d"
             )
 
-        cmd = [
+        base_cmd = [
             str(sports2d_exe),
             "--video_input",          video_path,
             "--save_pose",            "true",
             "--to_meters",            "true",
             "--first_person_height",  str(self.height_m),
             "--result_dir",           str(session_dir),
-            "--save_vid",             "true",
+            "--save_vid",             "false",
             "--save_img",             "false",
             # Automate: detect 1 person, auto-select largest, no UI popups
             "--nb_persons_to_detect", "1",
             "--person_ordering_method", "largest_size",
             "--show_realtime_results", "false",
             "--show_graphs",          "false",
+            "--det_frequency",        "50",
         ]
 
-        proc = subprocess.run(
-            cmd,
-            capture_output=True, text=True, timeout=3600
-        )
+        # GPU attempt first, then CPU fallback
+        attempts = [
+            {"backend": "onnxruntime", "device": "cuda",  "label": "GPU (CUDA)"},
+            {"backend": "openvino",    "device": "cpu",   "label": "CPU (OpenVINO)"},
+        ]
 
-        # Always dump full output to a log file for debugging
-        log_file = session_dir / f"sports2d_{cond}_log.txt"
-        with open(log_file, "w", encoding="utf-8") as f:
-            f.write(f"=== COMMAND ===\n{' '.join(cmd)}\n\n")
-            f.write(f"=== RETURN CODE: {proc.returncode} ===\n\n")
-            f.write(f"=== STDOUT ===\n{proc.stdout}\n\n")
-            f.write(f"=== STDERR ===\n{proc.stderr}\n")
+        for attempt in attempts:
+            cmd = base_cmd + [
+                "--backend", attempt["backend"],
+                "--device",  attempt["device"],
+            ]
+
+            proc = subprocess.run(
+                cmd,
+                capture_output=True, text=True, timeout=3600
+            )
+
+            # Dump full output to a log file for debugging
+            suffix = "_gpu" if attempt["device"] == "cuda" else "_cpu"
+            log_file = session_dir / f"sports2d_{cond}{suffix}_log.txt"
+            with open(log_file, "w", encoding="utf-8") as f:
+                f.write(f"=== ATTEMPT: {attempt['label']} ===\n")
+                f.write(f"=== COMMAND ===\n{' '.join(cmd)}\n\n")
+                f.write(f"=== RETURN CODE: {proc.returncode} ===\n\n")
+                f.write(f"=== STDOUT ===\n{proc.stdout}\n\n")
+                f.write(f"=== STDERR ===\n{proc.stderr}\n")
+
+            # Check for CUDA runtime errors or data loss in output
+            combined_output = proc.stdout + proc.stderr
+            cuda_failed = (
+                "cudaError" in combined_output
+                or "CUDA error" in combined_output
+                or "CUDNN failure" in combined_output
+                or "Deleting person" in combined_output
+                or "bad allocation" in combined_output
+                or "paging file is too small" in combined_output
+                or "Failed to create CUDAExecutionProvider" in combined_output
+                or "Pose estimation failed" in combined_output
+            )
+
+            if cuda_failed and attempt["device"] == "cuda":
+                import logging
+                logging.warning(
+                    f"Sports2D CUDA errors detected for {cond}. "
+                    f"Retrying with CPU fallback. See log: {log_file}"
+                )
+                self.progress.emit(
+                    f"sports2d_{cond}", "running", 0
+                )
+                # Clean up potentially corrupted output before retry
+                for bad_trc in session_dir.rglob("*_m_person*.trc"):
+                    bad_trc.unlink(missing_ok=True)
+                continue  # retry with CPU
+
+            # If we got here, no CUDA failure — proceed with result checking
+            break
 
         # Find the generated _m_person00.trc
         trc_files = sorted(session_dir.rglob("*_m_person*.trc"))

@@ -61,21 +61,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from scipy import stats
-
-
-# ---------------------------------------------------------------------------
-# Outlier thresholds — EXACT values from DUO-GAIT
-# File: LFRF_parameters/pipeline/gait_parameters.py
-# ---------------------------------------------------------------------------
-_ANGLE_CHANGE_THRESHOLD   = 0.2   # line 128  (not used in video domain)
-_STRIDE_LENGTH_MIN        = 0.2   # line 129  metres
-_STRIDE_TIME_MAX          = 2.0   # line 130  seconds
-_STANCE_RATIO_MIN         = 0.3   # line 131  dimensionless
-                                   # DUO-GAIT uses 0.5 for IMU data; lowered
-                                   # for video domain where 30fps timing noise
-                                   # yields ratios of 0.35-0.45 for valid strides
-_Z_SCORE_THRESHOLD        = 3     # line 172
 
 
 def calculate_parameters(
@@ -214,40 +199,15 @@ def calculate_parameters(
 
 def _flag_outliers(df: pd.DataFrame, side: str) -> pd.DataFrame:
     """
-    Flag outlier strides using the exact DUO-GAIT criteria.
-    The 'is_outlier' and 'turning_step' columns are added.
-    Turning detection based on angle_change is replaced by checking for
-    AP-velocity reversal (done in outlier_remover.py); this function only
-    applies threshold and z-score rules.
+    Add is_outlier and turning_step columns (set to False).
+
+    Outlier flagging is disabled because the input videos are recorded
+    with turning strides excluded from frame, making threshold-based
+    and z-score-based removal unnecessary.
     """
     df = df.copy()
     df["is_outlier"]  = False
     df["turning_step"] = False
-
-    # -- NaN check (line 123) --
-    # Only check core parameters for NaN; step_time and double_support_time
-    # are intentionally NaN at this stage (filled later as cross-foot params)
-    _core_cols = ["stride_lengths", "stride_times", "swing_times",
-                  "stance_times", "stance_ratios"]
-    core_cols_present = [c for c in _core_cols if c in df.columns]
-    df.loc[df[core_cols_present].isna().any(axis=1), "is_outlier"] = True
-
-    # -- Threshold-based outliers (lines 127-139) --
-    # Note: angle_change check (> 0.2) skipped here — handled by outlier_remover
-    df.loc[df["stride_lengths"] < _STRIDE_LENGTH_MIN, "is_outlier"] = True
-    df.loc[df["stride_times"]   > _STRIDE_TIME_MAX,   "is_outlier"] = True
-    df.loc[df["stance_ratios"]  < _STANCE_RATIO_MIN,  "is_outlier"] = True
-
-    # -- Z-score outliers (lines 162-201) --
-    # Applied to: stride_lengths, stride_times, swing_times, stance_times, stance_ratios
-    for param in ["stride_lengths", "stride_times", "swing_times",
-                  "stance_times", "stance_ratios"]:
-        if df[param].notna().sum() < 2:
-            continue
-        z = np.abs(stats.zscore(df[param].fillna(df[param].median())))
-        df[f"z_score_{param}"] = z
-        df.loc[z > _Z_SCORE_THRESHOLD, "is_outlier"] = True
-
     return df
 
 
