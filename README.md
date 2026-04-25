@@ -387,6 +387,24 @@ When video input is used, a `sports2d_st/` or `sports2d_dt/` subdirectory contai
 - Required keypoints: `LHeel`, `RHeel`, `LBigToe`, `RBigToe`.
 - Optional keypoints: `LAnkle`, `RAnkle`.
 
+### Boundary CSV Format (Optional)
+
+You can provide an optional CSV file for each condition to automatically exclude partial/turning strides as the patient enters or exits the camera frame.
+
+- Format: Two columns, `time_s` and `event`.
+- `time_s` can be plain seconds (e.g., `45.5`) or `MM:SS` (e.g., `1:15`).
+- `event` must be either `enter` or `exit`.
+
+```csv
+time_s,event
+0:05,enter
+0:25,exit
+0:40,enter
+1:05,exit
+```
+
+When provided, the pipeline will automatically exclude the first stride after each `enter` and the last stride before each `exit`.
+
 ---
 
 ## Troubleshooting

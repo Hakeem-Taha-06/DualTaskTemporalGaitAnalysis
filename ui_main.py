@@ -209,7 +209,50 @@ class InputPanel(QWidget):
         self.fps_spin.setValue(120)
         row2.addWidget(self.fps_spin)
         lay_num.addLayout(row2)
+
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("Speed Factor:"))
+        self.speed_factor_spin = QDoubleSpinBox()
+        self.speed_factor_spin.setRange(0.1, 100.0)
+        self.speed_factor_spin.setValue(1.0)
+        self.speed_factor_spin.setSingleStep(0.1)
+        self.speed_factor_spin.setToolTip(
+            "Playback speed correction. Set to 8.0 if the video is "
+            "8\u00d7 slower than real-time (e.g. 240fps recorded, 30fps playback)."
+        )
+        row3.addWidget(self.speed_factor_spin)
+        lay_num.addLayout(row3)
         root.addWidget(grp_num)
+
+        # ── Boundary timestamps (optional) ────────────────────────────
+        grp_bnd = QGroupBox("Boundary Timestamps (optional)")
+        lay_bnd = QVBoxLayout(grp_bnd)
+
+        # ST boundaries
+        lay_bnd.addWidget(QLabel("ST enter/exit CSV:"))
+        row_st_bnd = QHBoxLayout()
+        self.st_boundaries_edit = QLineEdit()
+        self.st_boundaries_edit.setPlaceholderText("Optional — enter/exit timestamps")
+        row_st_bnd.addWidget(self.st_boundaries_edit)
+        btn_st_bnd = QPushButton("…")
+        btn_st_bnd.setFixedWidth(30)
+        btn_st_bnd.clicked.connect(lambda: self._browse_csv(self.st_boundaries_edit))
+        row_st_bnd.addWidget(btn_st_bnd)
+        lay_bnd.addLayout(row_st_bnd)
+
+        # DT boundaries
+        lay_bnd.addWidget(QLabel("DT enter/exit CSV:"))
+        row_dt_bnd = QHBoxLayout()
+        self.dt_boundaries_edit = QLineEdit()
+        self.dt_boundaries_edit.setPlaceholderText("Optional — enter/exit timestamps")
+        row_dt_bnd.addWidget(self.dt_boundaries_edit)
+        btn_dt_bnd = QPushButton("…")
+        btn_dt_bnd.setFixedWidth(30)
+        btn_dt_bnd.clicked.connect(lambda: self._browse_csv(self.dt_boundaries_edit))
+        row_dt_bnd.addWidget(btn_dt_bnd)
+        lay_bnd.addLayout(row_dt_bnd)
+
+        root.addWidget(grp_bnd)
 
         # ── Run button + progress ─────────────────────────────────────
         self.run_btn = QPushButton("▶  Run Analysis")
@@ -287,6 +330,13 @@ class InputPanel(QWidget):
         setattr(self, f"{cond}_rdo_vid",  rdo_vid)
         return grp
 
+    def _browse_csv(self, target_edit: QLineEdit):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Boundary CSV", "", "CSV files (*.csv);;All files (*)"
+        )
+        if path:
+            target_edit.setText(path)
+
     def _browse_output(self):
         path = QFileDialog.getExistingDirectory(self, "Select Output Directory")
         if path:
@@ -302,6 +352,9 @@ class InputPanel(QWidget):
             "height_m":       self.height_spin.value(),
             "fps":            self.fps_spin.value(),
             "output_dir":     self.out_edit.text().strip(),
+            "st_boundaries_csv": self.st_boundaries_edit.text().strip(),
+            "dt_boundaries_csv": self.dt_boundaries_edit.text().strip(),
+            "speed_factor":   self.speed_factor_spin.value(),
         }
         if not config["st_input"] or not config["dt_input"]:
             QMessageBox.warning(self, "Missing Input", "Please provide ST and DT file paths.")
@@ -801,6 +854,9 @@ class MainWindow(QMainWindow):
             height_m       = config["height_m"],
             fps            = config["fps"],
             output_dir     = config["output_dir"],
+            st_boundaries_csv = config.get("st_boundaries_csv", ""),
+            dt_boundaries_csv = config.get("dt_boundaries_csv", ""),
+            speed_factor   = config.get("speed_factor", 1.0),
         )
         self._runner.progress.connect(self._on_progress)
         self._runner.finished.connect(self._on_finished)
