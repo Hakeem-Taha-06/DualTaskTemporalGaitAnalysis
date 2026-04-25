@@ -43,14 +43,13 @@ except ImportError:
     from PyQt6.QtCore import QThread, pyqtSignal as Signal
 
 # Pipeline modules
-sys.path.insert(0, str(Path(__file__).parent))
-import input_loader
-import preprocessor
-import event_detector
-import parameter_calculator
-import outlier_remover
-import aggregator
-import dtc_calculator
+from gait import input_loader
+from gait import preprocessor
+from gait import event_detector
+from gait import parameter_calculator
+from gait import outlier_remover
+from gait import aggregator
+from gait import dtc_calculator
 
 
 # ---------------------------------------------------------------------------

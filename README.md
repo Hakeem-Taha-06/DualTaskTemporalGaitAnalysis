@@ -116,7 +116,7 @@ pip install sports2d
 ### GUI Mode (Single Participant)
 
 ```bash
-python ui_main.py
+python run_ui.py
 ```
 
 1. Enter a participant ID.
@@ -139,7 +139,7 @@ python main.py --config participant_config.json
 Launch the GUI with:
 
 ```bash
-python ui_main.py
+python run_ui.py
 ```
 
 ### Left Panel — Input & Controls
@@ -440,16 +440,12 @@ When provided, the pipeline will automatically exclude the first stride after ea
 
 ```
 DualTaskTemporalGaitAnalysis/
-├── ui_main.py                 # GUI application entry point
+├── gait/                      # Core pipeline modules (parameters, DTC, etc.)
+├── runners/                   # Pipeline and batch orchestration
+├── ui/                        # Desktop application UI
+├── tests/                     # Test suite
+├── run_ui.py                  # GUI application entry point
 ├── main.py                    # CLI batch processing entry point
-├── pipeline_runner.py         # QThread-based pipeline orchestrator
-├── input_loader.py            # TRC file parser
-├── preprocessor.py            # Optional signal filtering
-├── event_detector.py          # Heel-strike / toe-off detection
-├── parameter_calculator.py    # Stride-by-stride parameter computation
-├── outlier_remover.py         # Outlier and turning detection
-├── aggregator.py              # Summary statistics (mean, CV, SI)
-├── dtc_calculator.py          # Dual-Task Cost computation
 ├── participant_config.json    # Example batch config
 ├── requirements.txt           # Python dependencies
 └── README.md                  # This file
