@@ -316,6 +316,7 @@ class PipelineRunner(QThread):
                 gait_ev, self._results["preprocess_st"]
             )
             df = self._apply_speed_factor(df)
+            df = parameter_calculator.flag_outliers(df)
             df.to_csv(out / "03_strides_raw_st.csv", index=False)
             return df
 
@@ -328,6 +329,7 @@ class PipelineRunner(QThread):
                 gait_ev, self._results["preprocess_dt"]
             )
             df = self._apply_speed_factor(df)
+            df = parameter_calculator.flag_outliers(df)
             df.to_csv(out / "03_strides_raw_dt.csv", index=False)
             return df
 
@@ -463,7 +465,7 @@ class PipelineRunner(QThread):
             "--person_ordering_method", "largest_size",
             "--show_realtime_results", "false",
             "--show_graphs",          "false",
-            "--det_frequency",        "50",
+            "--det_frequency",        "30",
         ]
 
         # GPU attempt first, then CPU fallback

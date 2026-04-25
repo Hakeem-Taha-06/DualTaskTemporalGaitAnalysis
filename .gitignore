@@ -209,10 +209,14 @@ __marimo__/
 
 # video and output data
 *.mp4
-*.csv
 *.png
 *.trc
 *.mot
 *.c3d
 *.toml
+
+#everything inside "out/"
 /out
+
+#exclude only the csvs inside "out/", not inside "data/"
+/out/*.csv
