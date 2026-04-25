@@ -104,9 +104,10 @@ class PipelineRunner(QThread):
     error(message: str)
         Emitted on unrecoverable failure.
     """
-    progress = Signal(str, str, int)   # stage_name, status, percent
-    finished = Signal(dict)
-    error    = Signal(str)
+    progress          = Signal(str, str, int)   # stage_name, status, percent
+    finished          = Signal(dict)
+    error             = Signal(str)
+    sports2d_progress = Signal(str, int, float, str)  # cond, pct, fps, eta
 
     def __init__(
         self,
@@ -478,23 +479,52 @@ class PipelineRunner(QThread):
                 "--device",  attempt["device"],
             ]
 
-            proc = subprocess.run(
+            # ---- Stream output live so we can parse tqdm progress ----
+            import re
+            import threading
+
+            stdout_lines: list[str] = []
+            stderr_lines: list[str] = []
+            # tqdm pattern: e.g. " 45%|████  | 91/201 [00:02<00:03, 32.5it/s]"
+            tqdm_pat = re.compile(
+                r"(\d+)%\|.*?\|\s*(\d+)/(\d+)\s*\[.*?,\s*([\d.]+)it/s\]"
+            )
+            eta_pat = re.compile(r"\[(\d+:\d+)<(\d+:\d+)")
+
+            proc = subprocess.Popen(
                 cmd,
-                capture_output=True, text=True, timeout=3600
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,   # merge stderr into stdout
+                text=True,
+                encoding="utf-8",
+                errors="replace",
             )
 
-            # Dump full output to a log file for debugging
+            for line in proc.stdout:
+                stdout_lines.append(line)
+                m = tqdm_pat.search(line)
+                if m:
+                    pct  = int(m.group(1))
+                    fps  = float(m.group(4))
+                    # Parse ETA from the time portion
+                    eta_str = ""
+                    em = eta_pat.search(line)
+                    if em:
+                        eta_str = em.group(2)   # remaining time e.g. "00:45"
+                    self.sports2d_progress.emit(cond, pct, fps, eta_str)
+
+            proc.wait()
+
+            combined_output = "".join(stdout_lines)
             suffix = "_gpu" if attempt["device"] == "cuda" else "_cpu"
             log_file = session_dir / f"sports2d_{cond}{suffix}_log.txt"
             with open(log_file, "w", encoding="utf-8") as f:
                 f.write(f"=== ATTEMPT: {attempt['label']} ===\n")
                 f.write(f"=== COMMAND ===\n{' '.join(cmd)}\n\n")
                 f.write(f"=== RETURN CODE: {proc.returncode} ===\n\n")
-                f.write(f"=== STDOUT ===\n{proc.stdout}\n\n")
-                f.write(f"=== STDERR ===\n{proc.stderr}\n")
+                f.write(f"=== STDOUT ===\n{combined_output}\n")
 
             # Check for CUDA runtime errors or data loss in output
-            combined_output = proc.stdout + proc.stderr
             cuda_failed = (
                 "cudaError" in combined_output
                 or "CUDA error" in combined_output
@@ -504,6 +534,8 @@ class PipelineRunner(QThread):
                 or "paging file is too small" in combined_output
                 or "Failed to create CUDAExecutionProvider" in combined_output
                 or "Pose estimation failed" in combined_output
+                or "ArrayMemoryError" in combined_output
+                or "Unable to allocate" in combined_output
             )
 
             if cuda_failed and attempt["device"] == "cuda":
