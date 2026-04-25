@@ -123,6 +123,7 @@ def remove_outliers(
 def _mark_boundary_strides(
     df: pd.DataFrame,
     csv_path: str,
+    margin_s: float = 1.0,
 ) -> pd.DataFrame:
     """
     Parse an enter/exit timestamp CSV and mark boundary strides.
@@ -135,11 +136,21 @@ def _mark_boundary_strides(
         5.80,enter
         10.50,exit
 
-    For each ``enter`` event the **first stride starting at or after** the
-    timestamp is marked ``is_outlier = True`` (incomplete / accelerating).
+    **Exclusion logic (three rules):**
 
-    For each ``exit`` event the **last stride starting at or before** the
-    timestamp is marked ``is_outlier = True`` (decelerating / incomplete).
+    1. For each ``enter`` event, all strides within ``[enter, enter + margin_s]``
+       are marked as outliers (person still accelerating / partially in frame).
+
+    2. For each ``exit`` event, all strides within ``[exit - margin_s, exit]``
+       are marked as outliers (person decelerating / partially out of frame).
+
+    3. All strides between an ``exit`` and the next ``enter`` (the dead zone
+       where the person is fully out of frame) are marked as outliers.
+
+    Parameters
+    ----------
+    margin_s : float
+        Seconds of data to exclude around each boundary event.  Default 1.0.
     """
     from pathlib import Path
 
@@ -165,26 +176,40 @@ def _mark_boundary_strides(
             return total_sec
         return float(t_str)
 
+    # Parse all events into an ordered list
+    events: list[dict] = []
     for _, row in boundaries.iterrows():
         try:
             time_s = parse_time(row["time_s"])
         except ValueError:
-            continue  # Skip rows with invalid time format
-        event  = str(row["event"]).strip().lower()
+            continue
+        event = str(row["event"]).strip().lower()
+        if event in ("enter", "exit"):
+            events.append({"time_s": time_s, "event": event})
 
-        if event == "enter":
-            # First stride starting at or after the entrance
-            mask = df["timestamps"] >= time_s
-            if mask.any():
-                idx = df.loc[mask, "timestamps"].idxmin()
-                df.at[idx, "is_outlier"] = True
+    # Sort by time to ensure correct gap detection
+    events.sort(key=lambda e: e["time_s"])
 
-        elif event == "exit":
-            # Last stride starting at or before the exit
-            mask = df["timestamps"] <= time_s
-            if mask.any():
-                idx = df.loc[mask, "timestamps"].idxmax()
-                df.at[idx, "is_outlier"] = True
+    # Rule 1 & 2: margin windows around each event
+    for ev in events:
+        t = ev["time_s"]
+        if ev["event"] == "enter":
+            mask = (df["timestamps"] >= t) & (df["timestamps"] <= t + margin_s)
+            df.loc[mask, "is_outlier"] = True
+            df.loc[mask, "removal_reason"] = "boundary_enter"
+        elif ev["event"] == "exit":
+            mask = (df["timestamps"] >= t - margin_s) & (df["timestamps"] <= t)
+            df.loc[mask, "is_outlier"] = True
+            df.loc[mask, "removal_reason"] = "boundary_exit"
+
+    # Rule 3: mark all strides in dead zones (between exit → next enter)
+    for i in range(len(events) - 1):
+        if events[i]["event"] == "exit" and events[i + 1]["event"] == "enter":
+            gap_start = events[i]["time_s"]
+            gap_end   = events[i + 1]["time_s"]
+            mask = (df["timestamps"] >= gap_start) & (df["timestamps"] <= gap_end)
+            df.loc[mask, "is_outlier"] = True
+            df.loc[mask & (df["removal_reason"] == ""), "removal_reason"] = "out_of_frame"
 
     return df
 

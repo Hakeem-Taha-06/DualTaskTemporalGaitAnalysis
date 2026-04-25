@@ -168,7 +168,7 @@ def run_single_participant_sync(
     Uses PipelineRunner's stage logic but runs in the calling thread.
     Returns dict of all stage results.
     """
-    from pipeline_runner import PipelineRunner
+    from runners.pipeline_runner import PipelineRunner
 
     runner = PipelineRunner(
         participant_id=config.participant_id,
@@ -675,7 +675,7 @@ class BatchPipelineRunner(QThread):
             self.batch_progress.emit(pid, idx + 1, total, "Starting", "running", 0)
 
             try:
-                from pipeline_runner import PipelineRunner
+                from runners.pipeline_runner import PipelineRunner
 
                 runner = PipelineRunner(
                     participant_id=cfg.participant_id,

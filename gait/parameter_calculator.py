@@ -174,7 +174,7 @@ def calculate_parameters(
             "double_support_time": double_support_times,
         })
 
-        df = _flag_outliers(df, side)
+        df = _init_outlier_columns(df)
         all_strides.append(df)
 
     if not all_strides:
@@ -193,21 +193,50 @@ def calculate_parameters(
 
 
 # ---------------------------------------------------------------------------
-# Outlier flagging — exact DUO-GAIT thresholds
+# Outlier columns — initialisation
+# ---------------------------------------------------------------------------
+
+def _init_outlier_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Add is_outlier and turning_step columns initialised to False."""
+    df = df.copy()
+    df["is_outlier"]   = False
+    df["turning_step"] = False
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Outlier flagging — threshold-based detection
 # File: LFRF_parameters/pipeline/gait_parameters.py lines 127-201
 # ---------------------------------------------------------------------------
 
-def _flag_outliers(df: pd.DataFrame, side: str) -> pd.DataFrame:
+def flag_outliers(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Add is_outlier and turning_step columns (set to False).
+    Mark strides with non-physiological parameter values as outliers.
 
-    Outlier flagging is disabled because the input videos are recorded
-    with turning strides excluded from frame, making threshold-based
-    and z-score-based removal unnecessary.
+    Thresholds are based on physiologically plausible gait parameter ranges.
+    Strides outside these ranges are almost certainly artifacts from phantom
+    tracking (person out of frame) or corrupted pose estimation.
+
+    This function should be called AFTER speed factor correction so that
+    thresholds are evaluated against real-time values.
     """
-    df = df.copy()
-    df["is_outlier"]  = False
-    df["turning_step"] = False
+    if df.empty:
+        return df
+
+    # Threshold-based outlier detection
+    # Values outside these ranges are non-physiological for human gait
+    checks = {
+        "stride_times":   (0.4, 3.0),   # Normal: 0.8–1.4 s
+        "stride_lengths": (0.2, 3.0),   # Normal: 1.0–1.8 m
+        "stance_ratios":  (0.3, 0.9),   # Normal: 0.55–0.65
+        "swing_times":    (0.1, 2.0),   # Normal: 0.3–0.5 s
+        "stance_times":   (0.2, 2.5),   # Normal: 0.5–0.9 s
+    }
+    for col, (lo, hi) in checks.items():
+        if col in df.columns:
+            mask = (df[col] < lo) | (df[col] > hi)
+            df.loc[mask, "is_outlier"] = True
+
     return df
 
 
