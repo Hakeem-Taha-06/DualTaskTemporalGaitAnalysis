@@ -124,14 +124,35 @@ def parse_master_csv(csv_path: Path) -> dict:
     Parse the per-participant master.csv (one row: height, fps, speed_factor).
 
     Returns dict with keys: height, fps, speed_factor.
+
+    Height unit handling
+    --------------------
+    The ``height`` field must be in **metres** (e.g. 1.72) because it is
+    passed directly to Sports2D's ``--first_person_height`` argument, which
+    expects metres.  As a safety net, any value greater than 3.0 is treated
+    as centimetres and silently converted (a human taller than 3 m is
+    physiologically impossible, so the value must be in cm).  A warning is
+    logged so the data-entry error is visible in the run log.
     """
     df = pd.read_csv(csv_path)
     if df.empty:
         raise ValueError(f"master.csv is empty: {csv_path}")
 
     row = df.iloc[0]
+    height = float(row.get("height", 1.70))
+
+    # Guard against height entered in centimetres instead of metres.
+    # 3.0 m is physiologically impossible; anything above it must be cm.
+    if height > 3.0:
+        logger.warning(
+            f"{csv_path}: height value {height} exceeds 3.0 — "
+            f"treating as centimetres and converting to {height / 100:.3f} m. "
+            f"Update the master.csv to use metres to silence this warning."
+        )
+        height /= 100.0
+
     return {
-        "height": float(row.get("height", 1.70)),
+        "height": height,
         "fps": float(row.get("fps", 30.0)),
         "speed_factor": float(row.get("speed_factor", 1.0)),
     }
@@ -509,8 +530,13 @@ def run_batch_cli(input_dir: Path, output_dir: Path) -> pd.DataFrame:
     folders = discover_participants(input_dir)
     logger.info(f"Found {len(folders)} participant folders in {input_dir}")
 
-    configs: list[ParticipantConfig] = []
-    all_results: list[dict] = []
+    # Use a single list of (config, results) tuples so that a participant
+    # failure never misaligns configs with results.  Previously the code
+    # maintained two separate lists and patched configs[i] = None on failure,
+    # but all_results was not padded with a placeholder — causing zip() to
+    # pair surviving configs with the *wrong* results when any failure occurred
+    # before a subsequent success, and silently dropping the last participant.
+    completed: list[tuple[ParticipantConfig, dict]] = []
 
     for folder in folders:
         missing = validate_participant_folder(folder)
@@ -522,38 +548,30 @@ def run_batch_cli(input_dir: Path, output_dir: Path) -> pd.DataFrame:
 
         try:
             cfg = build_participant_config(folder)
-            configs.append(cfg)
         except Exception as e:
             logger.error(f"Error parsing config for {folder.name}: {e}")
             continue
 
-    if not configs:
-        logger.error("No valid participant folders found. Aborting.")
-        return pd.DataFrame()
-
-    for i, cfg in enumerate(configs):
         print(f"\n{'='*60}")
-        print(f"  Processing {cfg.participant_id} ({i+1}/{len(configs)})")
+        print(f"  Processing {cfg.participant_id} ({len(completed)+1} of {len(folders)})")
         print(f"{'='*60}")
 
         try:
             results = run_single_participant_sync(cfg, output_dir)
-            all_results.append(results)
+            completed.append((cfg, results))
         except Exception as e:
             logger.error(f"ERROR processing {cfg.participant_id}: {e}")
             import traceback
             traceback.print_exc()
-            # Remove config so indices stay aligned
-            configs[i] = None  # type: ignore
+            # Nothing is appended — the pair is simply skipped.  Both lists
+            # stay perfectly aligned because they are the same list.
 
-    # Filter out failed participants
-    valid = [(c, r) for c, r in zip(configs, all_results) if c is not None]
-    if not valid:
+    if not completed:
         logger.error("All participants failed. No master output generated.")
         return pd.DataFrame()
 
-    valid_configs = [v[0] for v in valid]
-    valid_results = [v[1] for v in valid]
+    valid_configs = [c for c, r in completed]
+    valid_results = [r for c, r in completed]
 
     master_df = generate_master_output(valid_results, valid_configs,
                                         master_dir=output_dir / "master")
@@ -598,10 +616,11 @@ class BatchPipelineRunner(QThread):
     batch_error          = Signal(str)
     sports2d_progress    = Signal(str, int, float, str)
 
-    def __init__(self, input_dir: str, output_dir: str, parent=None):
+    def __init__(self, input_dir: str, output_dir: str, save_video: bool = False, parent=None):
         super().__init__(parent)
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
+        self.save_video = save_video
         self._cancel_requested = False
 
         # Error response mechanism (thread-safe)
@@ -689,6 +708,7 @@ class BatchPipelineRunner(QThread):
                     st_boundaries_csv=str(cfg.st_boundaries_csv),
                     dt_boundaries_csv=str(cfg.dt_boundaries_csv),
                     speed_factor=cfg.speed_factor,
+                    save_video=self.save_video,
                 )
 
                 # Forward progress signals
