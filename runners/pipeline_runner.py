@@ -123,6 +123,7 @@ class PipelineRunner(QThread):
         st_boundaries_csv: str = "",
         dt_boundaries_csv: str = "",
         speed_factor: float = 1.0,
+        save_video: bool = False,
         parent=None,
     ):
         super().__init__(parent)
@@ -139,6 +140,7 @@ class PipelineRunner(QThread):
         self.st_boundaries_csv = st_boundaries_csv
         self.dt_boundaries_csv = dt_boundaries_csv
         self.speed_factor      = speed_factor
+        self.save_video        = save_video
 
         self._stages = self._build_stage_graph()
         self._results: dict = {}
@@ -458,7 +460,7 @@ class PipelineRunner(QThread):
             "--to_meters",            "true",
             "--first_person_height",  str(self.height_m),
             "--result_dir",           str(session_dir),
-            "--save_vid",             "false",
+            "--save_vid",             "true" if self.save_video else "false",
             "--save_img",             "false",
             # Automate: detect 1 person, auto-select largest, no UI popups
             "--nb_persons_to_detect", "1",

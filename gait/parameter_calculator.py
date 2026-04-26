@@ -213,9 +213,20 @@ def flag_outliers(df: pd.DataFrame) -> pd.DataFrame:
     """
     Mark strides with non-physiological parameter values as outliers.
 
-    Thresholds are based on physiologically plausible gait parameter ranges.
-    Strides outside these ranges are almost certainly artifacts from phantom
-    tracking (person out of frame) or corrupted pose estimation.
+    Two sequential passes mirror the DUO-GAIT approach
+    (gait_parameters.py lines 127-201):
+
+    Pass 1 — Threshold-based detection
+        Hard physiological limits; strides outside these bounds are almost
+        certainly artifacts from phantom tracking or corrupted pose estimation.
+        Applied across both feet combined.
+
+    Pass 2 — Z-score detection (|z| > 3) per foot
+        Applied ONLY to strides that survived Pass 1 so that extreme
+        threshold-violating values do not skew the z-score statistics.
+        Replicates DUO-GAIT gait_parameters.py lines 127-201.
+        Minimum of 4 valid strides per foot required; fewer and the
+        z-score is undefined/unreliable, so Pass 2 is skipped for that foot.
 
     This function should be called AFTER speed factor correction so that
     thresholds are evaluated against real-time values.
@@ -223,8 +234,12 @@ def flag_outliers(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    # Threshold-based outlier detection
-    # Values outside these ranges are non-physiological for human gait
+    df = df.copy()
+
+    # ------------------------------------------------------------------
+    # Pass 1: Threshold-based outlier detection
+    # Values outside these ranges are non-physiological for human gait.
+    # ------------------------------------------------------------------
     checks = {
         "stride_times":   (0.4, 3.0),   # Normal: 0.8–1.4 s
         "stride_lengths": (0.2, 3.0),   # Normal: 1.0–1.8 m
@@ -236,6 +251,44 @@ def flag_outliers(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             mask = (df[col] < lo) | (df[col] > hi)
             df.loc[mask, "is_outlier"] = True
+
+    # ------------------------------------------------------------------
+    # Pass 2: Z-score detection — DUO-GAIT gait_parameters.py lines 127-201
+    # Applied per foot on strides that passed the threshold filter.
+    # z-score statistics are computed from valid (non-threshold-outlier)
+    # strides of each foot to avoid contamination by extreme values.
+    # ------------------------------------------------------------------
+    _Z_SCORE_THRESHOLD = 3.0
+    _MIN_STRIDES_FOR_ZSCORE = 4
+
+    z_cols = [
+        "stride_lengths", "stride_times",
+        "swing_times", "stance_times", "stance_ratios",
+    ]
+
+    for side in ("left", "right"):
+        side_mask  = df["foot"] == side
+        valid_mask = side_mask & (df["is_outlier"] == False)
+
+        for col in z_cols:
+            if col not in df.columns:
+                continue
+
+            valid_vals = df.loc[valid_mask, col].dropna()
+            if len(valid_vals) < _MIN_STRIDES_FOR_ZSCORE:
+                continue  # not enough data for reliable z-score
+
+            mean = valid_vals.mean()
+            std  = valid_vals.std(ddof=1)
+            if std == 0.0:
+                continue  # constant values — z-score undefined
+
+            # Compute z-scores for all strides of this foot (not just valid
+            # ones) so that already-threshold-flagged strides are not
+            # doubly-flagged but outlier detection is complete.
+            col_vals = df.loc[side_mask, col]
+            z_scores = (col_vals - mean).abs() / std
+            df.loc[side_mask & (z_scores > _Z_SCORE_THRESHOLD), "is_outlier"] = True
 
     return df
 
@@ -250,15 +303,23 @@ def _compute_stride_lengths(
     traj_df: pd.DataFrame,
 ) -> np.ndarray:
     """
-    Compute stride length as the Euclidean distance in the x-y plane between
-    heel positions at successive IC events.
-    DUO-GAIT uses foot trajectory position_x, position_y (line 247):
-        np.linalg.norm(step[0:2])
-    We use the heel keypoint x, y from the TRC file as the direct analogue.
+    Compute stride length as the anterior-posterior (x-axis) displacement of
+    the heel between successive IC events.
+
+    The coordinate system produced by Sports2D has:
+        x — anterior-posterior (direction of walking, positive = forward)
+        y — vertical (positive = upward)
+
+    DUO-GAIT uses the norm of the foot trajectory in the floor plane
+    (gait_parameters.py line 247: np.linalg.norm(step[0:2])).  In the IMU
+    domain those two axes are both horizontal (AP + ML).  In the sagittal
+    video domain the two available axes are AP (x) and vertical (y).
+    Including y inflates stride length by the heel's vertical oscillation
+    during swing phase, which is not part of the walking distance.  Only
+    the AP displacement abs(dx) is used here.
     """
     frame_to_row = {f: i for i, f in enumerate(traj_df["frame"].values)}
     x_col = f"{side}_heel_x"
-    y_col = f"{side}_heel_y"
 
     lengths: list[float] = []
     n_strides = len(ic_samples) - 1
@@ -273,8 +334,7 @@ def _compute_stride_lengths(
             continue
 
         dx = traj_df[x_col].iat[e_row] - traj_df[x_col].iat[s_row]
-        dy = traj_df[y_col].iat[e_row] - traj_df[y_col].iat[s_row]
-        lengths.append(np.linalg.norm([dx, dy]))
+        lengths.append(abs(float(dx)))
 
     return np.array(lengths)
 
