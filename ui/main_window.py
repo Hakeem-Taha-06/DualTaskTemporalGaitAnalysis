@@ -301,8 +301,8 @@ class InputPanel(QWidget):
         )
         root.addWidget(self.stage_log)
 
-        # ── Output directory ──────────────────────────────────────────
-        grp_out = QGroupBox("Output")
+        # ── Processing Options (output dir + toggles) ─────────────────
+        grp_out = QGroupBox("Processing Options")
         lay_out = QVBoxLayout(grp_out)
         row_out = QHBoxLayout()
         self.out_edit = QLineEdit(str(Path(".").resolve() / "out"))
@@ -313,10 +313,24 @@ class InputPanel(QWidget):
         row_out.addWidget(btn_out)
         lay_out.addLayout(row_out)
 
-        self.save_video_cb = QCheckBox("Save Sports2D Annotated Video")
+        # Checkboxes in a horizontal row to save vertical space
+        cb_row = QHBoxLayout()
+        self.save_video_cb = QCheckBox("Save Video")
         self.save_video_cb.setChecked(False)
-        self.save_video_cb.setToolTip("Enable to generate pose estimation overlay videos (slower processing).")
-        lay_out.addWidget(self.save_video_cb)
+        self.save_video_cb.setToolTip(
+            "Save Sports2D annotated video output (slower processing)."
+        )
+        cb_row.addWidget(self.save_video_cb)
+
+        self.segment_mode_cb = QCheckBox("Segment Mode")
+        self.segment_mode_cb.setChecked(False)
+        self.segment_mode_cb.setToolTip(
+            "Split video into valid segments using boundary timestamps\n"
+            "before processing. Eliminates phantom tracking in\n"
+            "out-of-frame gaps. Requires a boundaries CSV."
+        )
+        cb_row.addWidget(self.segment_mode_cb)
+        lay_out.addLayout(cb_row)
 
         root.addWidget(grp_out)
 
@@ -393,6 +407,7 @@ class InputPanel(QWidget):
             "dt_boundaries_csv": self.dt_boundaries_edit.text().strip(),
             "speed_factor":   self.speed_factor_spin.value(),
             "save_video":     self.save_video_cb.isChecked(),
+            "segment_mode":   self.segment_mode_cb.isChecked(),
         }
         if not config["st_input"] or not config["dt_input"]:
             QMessageBox.warning(self, "Missing Input", "Please provide ST and DT file paths.")
@@ -439,7 +454,8 @@ class InputPanel(QWidget):
         config = {
             "dataset_dir": dataset_dir, 
             "output_dir": output_dir,
-            "save_video": self.save_video_cb.isChecked()
+            "save_video": self.save_video_cb.isChecked(),
+            "segment_mode": self.segment_mode_cb.isChecked(),
         }
         self.run_btn.setEnabled(False)
         self.progress_bar.setValue(0)
@@ -978,6 +994,7 @@ class MainWindow(QMainWindow):
             dt_boundaries_csv = config.get("dt_boundaries_csv", ""),
             speed_factor   = config.get("speed_factor", 1.0),
             save_video     = config.get("save_video", False),
+            segment_mode   = config.get("segment_mode", False),
         )
         self._runner.progress.connect(self._on_progress)
         self._runner.finished.connect(self._on_finished)
@@ -1046,6 +1063,7 @@ class MainWindow(QMainWindow):
             input_dir=config["dataset_dir"],
             output_dir=config["output_dir"],
             save_video=config.get("save_video", False),
+            segment_mode=config.get("segment_mode", False),
         )
         self._batch_runner.batch_progress.connect(self._on_batch_progress)
         self._batch_runner.participant_complete.connect(self._on_participant_complete)

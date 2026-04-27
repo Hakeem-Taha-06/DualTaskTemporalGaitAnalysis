@@ -124,6 +124,7 @@ class PipelineRunner(QThread):
         dt_boundaries_csv: str = "",
         speed_factor: float = 1.0,
         save_video: bool = False,
+        segment_mode: bool = False,
         parent=None,
     ):
         super().__init__(parent)
@@ -141,6 +142,7 @@ class PipelineRunner(QThread):
         self.dt_boundaries_csv = dt_boundaries_csv
         self.speed_factor      = speed_factor
         self.save_video        = save_video
+        self.segment_mode      = segment_mode
 
         self._stages = self._build_stage_graph()
         self._results: dict = {}
@@ -296,14 +298,18 @@ class PipelineRunner(QThread):
         # ── Event detection ───────────────────────────────────────────
         if name == "detect_events_st":
             df = event_detector.detect_events(
-                self._results["preprocess_st"], fps=self._get_fps("st")
+                self._results["preprocess_st"],
+                fps=self._get_fps("st"),
+                speed_factor=self.speed_factor,
             )
             df.to_csv(out / "02_events_st.csv", index=False)
             return df
 
         if name == "detect_events_dt":
             df = event_detector.detect_events(
-                self._results["preprocess_dt"], fps=self._get_fps("dt")
+                self._results["preprocess_dt"],
+                fps=self._get_fps("dt"),
+                speed_factor=self.speed_factor,
             )
             df.to_csv(out / "02_events_dt.csv", index=False)
             return df
@@ -431,14 +437,154 @@ class PipelineRunner(QThread):
 
     def _run_sports2d(self, video_path: str, out_dir: Path, cond: str) -> dict:
         """
-        Run Sports2D as a subprocess on a video file.
+        Dispatcher: route to segmented or full-video Sports2D processing.
+
+        If a previous run already produced a TRC file in the expected output
+        location, that file is reused and Sports2D is skipped entirely.
+
+        Returns a dict with 'trc' (path to TRC) and 'video' (path to
+        annotated video, or empty string).
+        """
+        import logging
+
+        session_dir = out_dir / f"sports2d_{cond}"
+
+        # ----- Cache check: reuse existing TRC if available -----
+        cached = self._find_cached_trc(session_dir)
+        if cached:
+            logging.info(
+                f"Reusing cached TRC for {cond}: {cached['trc']}"
+            )
+            self.progress.emit(f"sports2d_{cond}", "done", 100)
+            return cached
+
+        if self.segment_mode:
+            csv = self.st_boundaries_csv if cond == "st" else self.dt_boundaries_csv
+            if csv and Path(csv).exists():
+                return self._run_sports2d_segmented(video_path, out_dir, cond, csv)
+            else:
+                logging.warning(
+                    f"Segment mode enabled for {cond} but no boundaries CSV "
+                    f"provided (or file missing). Falling back to full-video processing."
+                )
+        return self._run_sports2d_on_file(video_path, out_dir, cond)
+
+    def _find_cached_trc(self, session_dir: Path) -> dict | None:
+        """
+        Check if a previous Sports2D run already produced usable TRC output.
+
+        Looks for:
+          1. merged_person00.trc  (segmented mode output)
+          2. *_m_person*.trc      (full-video mode output)
+
+        Returns a result dict compatible with _run_sports2d_on_file() output,
+        or None if no cached output is found.
+        """
+        if not session_dir.exists():
+            return None
+
+        # Priority 1: merged TRC from segmented mode
+        merged = session_dir / "merged_person00.trc"
+        if merged.exists() and merged.stat().st_size > 0:
+            video = self._find_annotated_video(session_dir)
+            return {"trc": str(merged), "video": video}
+
+        # Priority 2: standard Sports2D TRC from full-video mode
+        trc_files = sorted(session_dir.rglob("*_m_person*.trc"))
+        if trc_files:
+            video = self._find_annotated_video(session_dir)
+            return {"trc": str(trc_files[0]), "video": video}
+
+        return None
+
+    def _find_annotated_video(self, session_dir: Path) -> str:
+        """Find an annotated video in the session directory, if any."""
+        vid_exts = ("*.mp4", "*.avi", "*.mov", "*.mkv")
+        vid_files = []
+        for ext in vid_exts:
+            vid_files.extend(session_dir.rglob(ext))
+        # Filter out segment source clips
+        annotated = [v for v in vid_files if "Sports2D" in v.name]
+        return str(annotated[0]) if annotated else ""
+
+    def _run_sports2d_segmented(
+        self, video_path: str, out_dir: Path, cond: str, csv_path: str
+    ) -> dict:
+        """
+        Segmented Sports2D processing: slice video → process each segment →
+        stitch TRC files back with corrected timestamps.
+        """
+        from gait import video_slicer
+
+        session_dir = out_dir / f"sports2d_{cond}"
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Parse segments from CSV
+        self.progress.emit(f"sports2d_{cond}", "running", 0)
+        segments = video_slicer.parse_segments(csv_path, min_duration_s=10.0)
+
+        # 2. Slice video using FFmpeg
+        segment_videos = video_slicer.slice_video(
+            video_path, segments, session_dir
+        )
+
+        # 3. Process each segment through Sports2D
+        trc_paths = []
+        segment_videos_out = []  # annotated videos per segment
+        total_segs = len(segments)
+
+        for i, (seg, seg_video) in enumerate(zip(segments, segment_videos)):
+            seg_pct = int((i / total_segs) * 100)
+            self.progress.emit(
+                f"sports2d_{cond}", "running", seg_pct
+            )
+
+            seg_dir = session_dir / f"seg_{i:02d}"
+            result = self._run_sports2d_on_file(
+                str(seg_video), seg_dir, cond,
+                _progress_offset=(i, total_segs),
+            )
+            trc_paths.append(Path(result["trc"]))
+            if result.get("video"):
+                segment_videos_out.append(result["video"])
+
+        # 4. Stitch TRC files
+        self.progress.emit(f"sports2d_{cond}", "running", 95)
+        merged_trc, _ = video_slicer.stitch_trc_files(
+            trc_paths, segments, session_dir, fallback_fps=self.fps
+        )
+
+        # 5. Cleanup temp segment video clips (keep TRCs for debugging)
+        for seg_video in segment_videos:
+            seg_video.unlink(missing_ok=True)
+
+        self.progress.emit(f"sports2d_{cond}", "done", 100)
+
+        return {
+            "trc": str(merged_trc),
+            "video": "",  # no single merged video
+            "segment_videos": segment_videos_out,
+        }
+
+    def _run_sports2d_on_file(
+        self, video_path: str, out_dir: Path, cond: str,
+        _progress_offset: tuple[int, int] | None = None,
+    ) -> dict:
+        """
+        Run Sports2D as a subprocess on a single video file.
         Returns a dict with 'trc' (path to TRC) and 'video' (path to
         annotated video, or empty string if not found).
 
         Tries GPU (onnxruntime + cuda) first; if CUDA errors are detected
         in the output, automatically retries with CPU (openvino).
+
+        Parameters
+        ----------
+        _progress_offset : tuple[int, int] or None
+            If set, (segment_index, total_segments) — used to scale the
+            per-segment tqdm progress into the overall condition progress.
         """
-        session_dir = out_dir / f"sports2d_{cond}"
+        session_dir = out_dir if out_dir.name.startswith("seg_") else out_dir / f"sports2d_{cond}"
         session_dir.mkdir(parents=True, exist_ok=True)
 
         # Resolve the sports2d console script installed alongside this Python
@@ -462,9 +608,9 @@ class PipelineRunner(QThread):
             "--result_dir",           str(session_dir),
             "--save_vid",             "true" if self.save_video else "false",
             "--save_img",             "false",
-            # Automate: detect 1 person, auto-select largest, no UI popups
+            # Automate: detect 1 person, auto-select by highest likelihood, no UI popups
             "--nb_persons_to_detect", "1",
-            "--person_ordering_method", "largest_size",
+            "--person_ordering_method", "highest_likelihood",
             "--show_realtime_results", "false",
             "--show_graphs",          "false",
             "--det_frequency",        "30",
@@ -514,7 +660,18 @@ class PipelineRunner(QThread):
                     em = eta_pat.search(line)
                     if em:
                         eta_str = em.group(2)   # remaining time e.g. "00:45"
-                    self.sports2d_progress.emit(cond, pct, fps, eta_str)
+
+                    # Scale progress if running inside segmented mode
+                    if _progress_offset is not None:
+                        seg_idx, total_segs = _progress_offset
+                        # Map segment's 0-100% into its slice of overall 0-100%
+                        scaled_pct = int(
+                            (seg_idx / total_segs) * 100
+                            + (pct / total_segs)
+                        )
+                        self.sports2d_progress.emit(cond, scaled_pct, fps, eta_str)
+                    else:
+                        self.sports2d_progress.emit(cond, pct, fps, eta_str)
 
             proc.wait()
 
