@@ -616,11 +616,12 @@ class BatchPipelineRunner(QThread):
     batch_error          = Signal(str)
     sports2d_progress    = Signal(str, int, float, str)
 
-    def __init__(self, input_dir: str, output_dir: str, save_video: bool = False, parent=None):
+    def __init__(self, input_dir: str, output_dir: str, save_video: bool = False, segment_mode: bool = False, parent=None):
         super().__init__(parent)
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
         self.save_video = save_video
+        self.segment_mode = segment_mode
         self._cancel_requested = False
 
         # Error response mechanism (thread-safe)
@@ -709,6 +710,7 @@ class BatchPipelineRunner(QThread):
                     dt_boundaries_csv=str(cfg.dt_boundaries_csv),
                     speed_factor=cfg.speed_factor,
                     save_video=self.save_video,
+                    segment_mode=self.segment_mode,
                 )
 
                 # Forward progress signals

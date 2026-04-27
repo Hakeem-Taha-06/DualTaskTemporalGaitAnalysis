@@ -47,8 +47,11 @@ This tool is designed for researchers and clinicians studying **dual-task gait a
 - **Automated Processing** — Sports2D auto-selects the largest detected person and runs without manual intervention.
 - **DUO-GAIT Compatible** — Gait parameter formulas, outlier thresholds, and aggregation methods match the DUO-GAIT research pipeline.
 - **Outlier Detection** — Threshold-based and z-score outlier flagging, turning stride detection, and configurable head/tail trimming.
+- **Boundary Timestamps** — Optional enter/exit CSV files to automatically exclude strides when the participant is out of frame.
+- **Segment Processing Mode** — Splits videos into valid segments using boundary timestamps before pose estimation, eliminating phantom tracking in out-of-frame gaps.
 - **Interactive Results** — Time-series plots of stride parameters (left/right foot, outliers highlighted), DTC bar charts, and a filterable raw data table.
-- **Batch Processing** — Command-line mode for processing multiple participants from a JSON config file.
+- **Batch Processing** — GUI and command-line mode for processing multiple participants from a dataset directory.
+- **Slow-Motion Support** — Speed factor correction for videos recorded at high FPS and played back at lower FPS.
 - **CSV Export** — All intermediate and final results saved as CSV files for further analysis.
 
 ---
@@ -69,6 +72,12 @@ This tool is designed for researchers and clinicians studying **dual-task gait a
 | `pyqtgraph` | ≥ 0.13 | Interactive charts (falls back to `matplotlib`) |
 | `matplotlib` | ≥ 3.6 | Chart rendering (fallback) |
 | `sports2d` | ≥ 0.8 | 2D pose estimation (only needed for video input) |
+
+### External Tools
+
+| Tool | Required For | Notes |
+|------|-------------|-------|
+| [FFmpeg](https://ffmpeg.org/download.html) | Segment processing mode | Must be on system PATH. Used to split videos into segments. |
 
 ---
 
@@ -164,9 +173,11 @@ For each condition, you can provide:
 - **Height (m)** — Participant's height in metres (default: 1.70). Used by Sports2D to scale pixel coordinates to real-world units.
 - **FPS** — Frames per second of the recording (default: 120). This is used as a **fallback** value; the pipeline will auto-detect the actual FPS from the TRC file header when available.
 
-#### Output Directory
+#### Processing Options
 
-Where result CSV files and logs will be saved. Default: `./out`. A subdirectory named after the participant ID will be created automatically.
+- **Output directory** — Where result CSV files and logs will be saved. Default: `./out`. A subdirectory named after the participant ID will be created automatically.
+- **Save Video** — When checked, Sports2D generates annotated videos with pose overlays. Disabled by default (saves processing time and VRAM).
+- **Segment Mode** — When checked, videos are split into valid segments using boundary timestamps before pose estimation. Each segment is processed independently, eliminating phantom tracking when the participant is out of frame. Requires boundary CSV files. If a boundary CSV is not available for a specific video, that video falls back to full-video processing automatically.
 
 #### Run Analysis
 
@@ -354,7 +365,10 @@ When video input is used, a `sports2d_st/` or `sports2d_dt/` subdirectory contai
 | Input type | `.trc file` | Toggle between TRC and video input |
 | Height (m) | `1.70` | Participant height for Sports2D scaling |
 | FPS | `120` | Fallback frame rate (auto-detected from TRC header) |
+| Speed Factor | `1.0` | Playback speed correction (e.g., `8.0` for 240fps recorded at 30fps playback) |
 | Output directory | `./out` | Root directory for all outputs |
+| Save Video | unchecked | Generate Sports2D annotated video |
+| Segment Mode | unchecked | Split video into valid segments before processing |
 
 ### JSON Config (CLI Only)
 
@@ -403,7 +417,19 @@ time_s,event
 1:05,exit
 ```
 
-When provided, the pipeline will automatically exclude the first stride after each `enter` and the last stride before each `exit`.
+When provided, the pipeline will automatically exclude strides within a 1-second margin of each event, plus all strides in dead zones between `exit` and the next `enter`.
+
+#### Segment Processing Mode
+
+When **Segment Mode** is enabled in the UI, the pipeline uses the boundary CSV to physically split the video into valid segments before running Sports2D. This approach:
+
+- **Eliminates phantom tracking** — Sports2D never sees frames where the person is absent.
+- **Reduces memory usage** — Each segment is processed independently.
+- **Skips dead time** — Typically 40–50% of the video is out-of-frame time that is skipped entirely.
+
+Segments shorter than 10 seconds are automatically discarded. Videos are sliced using FFmpeg stream copy (`-c copy`), which is near-instant.
+
+If Segment Mode is enabled but a boundary CSV is not available for a specific video, that video automatically falls back to full-video processing.
 
 ---
 
@@ -432,7 +458,7 @@ When provided, the pipeline will automatically exclude the first stride after ea
 
 ### Sports2D asks to click on a person
 
-- This means the `--person_ordering_method` flag isn't being passed. Make sure you're running the latest version of the code. The pipeline now uses `--person_ordering_method largest_size` to auto-select.
+- This means the `--person_ordering_method` flag isn't being passed. Make sure you're running the latest version of the code. The pipeline now uses `--person_ordering_method highest_likelihood` to auto-select the most confident detection.
 
 ---
 
@@ -440,13 +466,22 @@ When provided, the pipeline will automatically exclude the first stride after ea
 
 ```
 DualTaskTemporalGaitAnalysis/
-├── gait/                      # Core pipeline modules (parameters, DTC, etc.)
+├── gait/                      # Core pipeline modules
+│   ├── input_loader.py        #   TRC file parsing
+│   ├── preprocessor.py        #   Trajectory filtering
+│   ├── event_detector.py      #   Heel-strike / toe-off detection
+│   ├── parameter_calculator.py#   Stride parameter computation
+│   ├── outlier_remover.py     #   Outlier & boundary filtering
+│   ├── aggregator.py          #   Summary statistics
+│   ├── dtc_calculator.py      #   Dual-Task Cost calculation
+│   └── video_slicer.py        #   FFmpeg video segmentation & TRC stitching
 ├── runners/                   # Pipeline and batch orchestration
+│   ├── pipeline_runner.py     #   Single-participant QThread runner
+│   └── batch_runner.py        #   Multi-participant batch runner
 ├── ui/                        # Desktop application UI
-├── tests/                     # Test suite
+│   └── main_window.py         #   Main window and all UI components
 ├── run_ui.py                  # GUI application entry point
 ├── main.py                    # CLI batch processing entry point
-├── participant_config.json    # Example batch config
 ├── requirements.txt           # Python dependencies
 └── README.md                  # This file
 ```

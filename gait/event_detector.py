@@ -67,14 +67,17 @@ _FO_PROMINENCE_M = 0.008
 # At 120 fps, a stride shorter than 0.5 s (60 frames) is physiologically
 # implausible; guards against double-detections.
 # NOT FOUND IN DUO-GAIT SOURCE — ASSUMPTION based on ~0.5 s minimum stride
-_MIN_IC_DISTANCE_FRAMES = 40  # ~0.33 s @ 120 fps
+_MIN_IC_DISTANCE_S = 0.70  # seconds (real-time minimum between heel strikes)
 
-# Minimum frames between successive FO events
-# Higher than IC distance because FO noise is more prevalent in video data
-_MIN_FO_DISTANCE_FRAMES = 60  # ~0.5 s @ 120 fps
+# Minimum seconds between successive FO events (real-time)
+_MIN_FO_DISTANCE_S = 0.70  # seconds
 
 
-def detect_events(traj_df: pd.DataFrame, fps: float = 120.0) -> pd.DataFrame:
+def detect_events(
+    traj_df: pd.DataFrame,
+    fps: float = 120.0,
+    speed_factor: float = 1.0,
+) -> pd.DataFrame:
     """
     Detect heel-strike (HS) and toe-off (TO) gait events from trajectory data.
 
@@ -85,7 +88,13 @@ def detect_events(traj_df: pd.DataFrame, fps: float = 120.0) -> pd.DataFrame:
         Must contain: frame, time_s, left_heel_y, right_heel_y,
                       left_toe_y, right_toe_y.
     fps : float
-        Sampling rate (Hz). Used to scale distance parameters.
+        Sampling rate (Hz) of the video (playback fps, NOT recording fps).
+    speed_factor : float
+        Slow-motion correction factor.  If the video was recorded at 240 fps
+        and plays at 30 fps, speed_factor = 8.0.  A real-time 1-second stride
+        appears as 8 seconds (240 frames) in the video.  The minimum-distance
+        parameters are scaled by this factor so that events are not
+        over-detected on slow-motion footage.
 
     Returns
     -------
@@ -106,9 +115,11 @@ def detect_events(traj_df: pd.DataFrame, fps: float = 120.0) -> pd.DataFrame:
         heel_y = _interpolate_nans(heel_y)
         toe_y  = _interpolate_nans(toe_y)
 
-        # Scale min-distance parameter with actual fps
-        ic_dist = max(1, int(_MIN_IC_DISTANCE_FRAMES * fps / 120.0))
-        fo_dist = max(1, int(_MIN_FO_DISTANCE_FRAMES * fps / 120.0))
+        # Scale min-distance parameter to account for playback fps AND
+        # slow-motion factor.  A real-time minimum of _MIN_IC_DISTANCE_S
+        # translates to (min_s * speed_factor * fps) frames in the video.
+        ic_dist = max(1, int(_MIN_IC_DISTANCE_S * speed_factor * fps))
+        fo_dist = max(1, int(_MIN_FO_DISTANCE_S * speed_factor * fps))
 
         # ------------------------------------------------------------------
         # IC (heel-strike): local MINIMUM in heel_y
