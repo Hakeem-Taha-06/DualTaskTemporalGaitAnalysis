@@ -1,0 +1,248 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{array} % put this in your preamble
+\usepackage{url}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+\title{Temporal Gait Modifications Under Cognitive Load
+Assessed via Monocular Markerless Motion Capture}
+
+
+\author{
+    \IEEEauthorblockN{Hakeem M. Taha}
+    \IEEEauthorblockA{\textit{Dept. of Syst. \& Biomed. Eng} \\
+    \textit{Cairo University}\\
+    hakeem.taha06@eng-st.cu.edu.eg}
+    \and
+    \IEEEauthorblockN{Seif T. Hegazy}
+    \IEEEauthorblockA{\textit{Dept. of Syst. \& Biomed. Eng} \\
+    \textit{Cairo University}\\
+    seif.hegazy06@eng-st.cu.edu.eg}
+
+    \\[0.5cm]
+
+    \IEEEauthorblockN{Mahmoud M. Mahfouz}
+    \IEEEauthorblockA{\textit{Dept. of Syst. \& Biomed. Eng} \\
+    \textit{Cairo University}\\
+    Mahmoud.Mahfouz07@eng-st.cu.edu.eg}
+    \and
+    \IEEEauthorblockN{Ziad A. Abdelawad}
+    \IEEEauthorblockA{\textit{Dept. of Syst. \& Biomed. Eng} \\
+    \textit{Cairo University}\\
+    ziad.abd-elawad06@eng-st.cu.edu.eg}
+}
+\maketitle
+
+\begin{abstract}
+Cognitive–motor interference during dual-task walking is
+widely recognized as a sensitive indicator of neuromotor
+control and early functional decline.
+While laboratory-based motion capture systems provide
+detailed biomechanical data, the capability of monocular mark-
+erless video analysis to detect subtle temporal gait alterations
+under cognitive load remains insufficiently characterized.
+This study investigates whether a sagittal-plane monocular
+motion capture pipeline can reliably quantify temporal gait
+changes induced by a cognitive dual-task paradigm in healthy
+adults.
+Participants will perform overground walking under single-
+task (normal walking) and dual-task (walking while perform-
+ing serial subtraction) conditions. Video recordings will be
+processed using a Python-based Sports2D workflow to extract
+spatiotemporal parameters, including step time, stance time,
+swing time, double-support time, cadence, and temporal vari-
+ability. Dual-task cost (DTC), along with the Coefficient of 
+Variation (CV) and Intraclass Correlation Coefficient (ICC), will 
+be computed to evaluate measurement consistency and reliability.
+The primary objective is to determine the sensitivity and re-
+liability of monocular 2D gait analysis for detecting cognitive-
+induced temporal gait modifications. Findings will contribute
+to the validation of monocular video systems for quantitative
+cognitive–motor assessment in applied biomechanics contexts.
+\end{abstract}
+\vspace{3mm}
+
+\begin{IEEEkeywords}
+Stochastic Neural Fields, Attractor Dynamics, Physics-Informed Reinforcement Learning (PIRL), Signal-to-Noise Ratio, Gain Modulation, Phase Transitions, Computational Neuroscience, Bifurcation Theory.
+\end{IEEEkeywords}
+
+\section{Introduction}
+Human gait has traditionally been viewed as a largely automated motor task; however, contemporary biomechanical research recognizes it as a complex cognitive-motor process [1]. When cognitive loads are introduced during walking, such as in dual-task paradigms, significant alterations in spatiotemporal gait parameters often emerge as the brain divides its resources [1]. Historically, quantifying these subtle kinematic shifts required expensive, laboratory-bound 3D motion capture systems or wearable sensor arrays like Inertial Measurement Units (IMUs) [1], [2]. Recently, advancements in computer vision and markerless pose estimation have introduced monocular video analysis as a highly accessible alternative for clinical and remote settings [3], [4]. This literature review synthesizes the foundational concepts of dual-task gait alterations, evaluates the validity of modern 2D video-based motion capture, explores the underlying pose-estimation technologies, and defines the research gap this study aims to address.
+
+\section{Literature Review}
+\subsection{Gait Alterations Under Cognitive Load}
+Introducing a secondary cognitive task during walking—known as a dual-task paradigm—competes for cortical resources and demonstrably alters gait patterns [1]. To systematically study this phenomenon, Zhou et al. developed the DUO-GAIT dataset, which captures the kinematic effects of cognitive load and fatigue in sixteen healthy young adults [1]. During the study's dual-task condition, participants were required to walk overground for six minutes while continuously subtracting seven from a random four-digit number [1]. The addition of this serial subtraction task significantly impacted spatial and temporal gait parameters, leading to a notable reduction in walking speed ($F(1,15) = 23.75, p < 0.001$) and a decrease in stride length ($F(1,15) = 17.03, p < 0.001$) [1]. Interestingly, Zhou et al. revealed that the gait modifications induced by cognitive dual-tasking were substantially larger than those caused by physical muscle fatigue alone [1]. The highly controlled, multi-sensor IMU data from DUO-GAIT, specifically the Dual-Task Cost (DTC) metrics, establishes a robust, gold-standard reference for the magnitude of temporal gait changes expected under cognitive load [1].
+
+\subsection{Validity of 2D Video-Based Markerless Motion Capture}
+While IMU systems and 3D motion capture yield highly accurate kinematic data, they require specialized, expensive equipment that limits their utility in standard clinical environments [1], [2]. Two-dimensional monocular video offers a highly accessible alternative. Stenum et al. rigorously evaluated the validity of 2D video-based pose estimation for human gait analysis by comparing features extracted via OpenPose against simultaneously recorded 3D motion capture in 31 healthy adults [2]. Their findings demonstrated excellent accuracy for spatiotemporal parameters: when calculating individual participant means, the mean absolute errors (MAE) were just 0.01 s for temporal gait parameters (such as step time, stance time, and swing time) and 0.018 m for step length [2]. Because these error margins fall well below published minimal detectable change (MDC) thresholds, the study confirms that 2D monocular video analysis possesses the sensitivity required to detect clinically meaningful gait modifications [2]. However, it is critical to note that their validation was restricted to steady-state, normal walking and did not evaluate the irregular cadences and varied stride intervals typical of dual-task cognitive loading [1], [2].
+
+\subsection{Advancements in Pose Estimation: RTMPose}
+The accuracy of any video-based gait analysis is fundamentally dependent on the quality of its underlying pose estimation algorithm [2], [4]. Previous validation studies, such as the one conducted by Stenum et al., relied on OpenPose—an older algorithm that is computationally heavy and less optimized for real-time applications [2], [3]. Recently, the state-of-the-art has advanced significantly with the introduction of RTMPose by Jiang et al. [3]. RTMPose is a high-performance, real-time multi-person pose estimation framework that treats keypoint localization as a classification task [3]. It achieves superior keypoint localization accuracy—reaching 65.3\%. Average Precision on the COCO-WholeBody dataset compared to OpenPose's 44.2\% while maintaining low latency and requiring a fraction of the computational overhead of its predecessors [3].
+
+\subsection{The Sports2D Analytical Framework}
+To make advanced pose estimators usable for biomechanical analysis, Pagnon and Kim developed Sports2D, an open-source, end-to-end Python software pipeline [4]. Sports2D integrates the RTMPose engine [3] to automatically detect joint coordinates from standard video or webcam feeds, computing 2D joint and segment angles specifically tailored for sagittal and frontal plane motions [4]. Furthermore, Sports2D applies necessary filtering (such as Butterworth or Gaussian filters) to remove pose estimation jitter and exports the kinematic data into OpenSim-compatible formats, such as .mot and .trc files [4]. It currently stands as the most user-friendly and highly capable open-source tool available for markerless sagittal-plane gait analysis [4].
+
+\subsection{Identified Research Gap and Preliminary Trajectory}
+Despite the methodological rigor established by Stenum et al. [2] and the technological capabilities of Sports2D [4], a distinct validation gap remains in the literature. Sports2D has not yet been validated against a reference standard for the extraction of highly variable spatio-temporal gait parameters, nor has any study tested whether a monocular video pipeline can accurately quantify the specific temporal gait alterations induced by cognitive dual-tasking [1], [2], [4]. This study directly addresses that gap by applying the Sports2D framework [4] to the serial-subtraction dual-task paradigm defined by DUO-GAIT [1]. By utilizing statistical reliability metrics—specifically targeting Coefficient of Variation (CV) and Intraclass Correlation Coefficient (ICC) benchmarks—while referencing the stringent accuracy thresholds established by Stenum et al. [2], this research evaluates whether RTMPose-driven video analysis [3] can reliably detect cognitive-motor gait changes. Preliminary video analyses of participants under both single and dual-task loads utilizing this proposed pipeline have already yielded highly promising results, indicating that the framework successfully captures these complex temporal modifications.
+
+\section{Methodology}
+\subsection{Data Acquisition Methods}
+
+We capture sagittal-plane video of participants walking at
+a self-selected pace using a smartphone camera recording at
+120 fps to ensure high temporal resolution (±8.3 ms). The
+camera was mounted on a tripod at hip height, positioned
+4 meters from a calibrated 4-meter runway to minimize
+parallax error [5]. Data are collected under two conditions—
+Baseline and Cognitive Load (Serial 7s task)—allowing for
+the calculation of the Dual-Task Cost (DTC) via markerless tracking in Sports2D.
+
+\subsection{Software \& Raw Tracked Parameters} 
+Sports2D [4] is an open-source Python-based markerless
+motion capture pipeline that uses the RTMPose engine [3] to
+extract anatomical keypoints from video frames. By detecting
+gait events such as heel-strike and toe-off, it measures step
+time, stance time, swing time, double-support time, cadence,
+and temporal variability.
+
+\subsection{Data Processing Methods}
+Video recordings are processed through a custom automated Python pipeline utilizing Sports2D [4] to obtain 2D foot keypoint trajectories across frames. To minimize pose estimation noise, the raw trajectories are first smoothed using a zero-phase 3~Hz Butterworth low-pass filter. Heel-Strike (HS) and Toe-Off (TO) events are subsequently identified by detecting local minima in the vertical trajectories of the heel and toe keypoints, applying physiologically constrained minimum prominence and inter-event distance thresholds (e.g., a minimum 0.70~s between consecutive heel strikes).
+
+Following event detection, frame indices are converted to timestamps ($t = \text{Frame}_{\text{index}} / \text{fps}$), allowing stride-by-stride computation of spatial and temporal parameters, including stride length, stride time, stance time, swing time, and stance ratio. The pipeline automatically flags outliers using video-adapted physiological thresholds (e.g., excluding strides with stance ratios outside the 0.1 to 0.95 range or lengths under 0.2~m) alongside a statistical z-score pass ($|z| > 3$). Additionally, incomplete boundary strides captured as the subject enters or exits the camera frame are excluded using a defined time margin. Finally, summary statistics (mean and coefficient of variation) are aggregated across all valid strides. To evaluate the pipeline's sensitivity to cognitive-motor interference, we compute the Dual-Task Cost (DTC)—the relative percentage change in each aggregated parameter between the single- and dual-task conditions. This enables us to determine whether the monocular 2D gait analysis framework can reliably detect and quantify cognitive-induced temporal gait modifications beyond expected measurement error. The full pipeline implementation is publicly available at \url{https://github.com/Hakeem-Taha-06/DualTaskTemporalGaitAnalysis}.
+
+\subsection{Statistical Analysis}
+To systematically establish the reliability and consistency of the pipeline's measurements, we calculate the Coefficient of Variation (CV) for each computed spatiotemporal parameter, as well as for the Dual-Task Cost (DTC) itself. The CV is computed as:
+\begin{equation}
+CV (\%) = \left( \frac{\sigma}{\mu} \right) \times 100
+\end{equation}
+where $\sigma$ is the standard deviation and $\mu$ is the mean of the parameter across strides.
+
+The Dual-Task Cost (DTC) represents the relative percentage change in performance between single-task (ST) and dual-task (DT) conditions, calculated as:
+\begin{equation}
+DTC (\%) = \left( \frac{X_{ST} - X_{DT}}{X_{ST}} \right) \times 100
+\end{equation}
+where $X_{ST}$ and $X_{DT}$ are the mean parameter values under single-task and dual-task conditions, respectively. Positive DTC values signify a reduction or worsening of the parameter under cognitive load.
+
+Furthermore, the Intraclass Correlation Coefficient (ICC), specifically ICC(1,1), is computed for each of the participants' recorded parameters to robustly assess measurement reliability across trials. To account for unbalanced datasets (varying numbers of strides per subject), the ICC(1,1) is calculated as:
+\begin{equation}
+ICC(1,1) = \frac{MS_B - MS_W}{MS_B + (n_0 - 1)MS_W}
+\end{equation}
+where $MS_B$ and $MS_W$ represent the mean squares between and within subjects, respectively, and $n_0$ is the adjusted number of observations per subject. 
+
+The validity of the pipeline is evaluated against predefined statistical thresholds: CV values below 10\% are considered to indicate good measurement consistency (i.e., ``good enough''), and ICC values above 0.6 are considered to represent good reliability.
+
+\section{Results}
+
+Across five participants, the pipeline's reliability varied substantially by parameter class and recording condition. Only two parameter–foot combinations met both the CV $<$ 10\% and ICC $>$ 0.6 thresholds simultaneously: right-foot stride times in the single-task condition (CV = 4.7\%, ICC = 0.633) and right-foot stride lengths in the dual-task condition (CV = 14.9\%, ICC = 0.659). The remainder of the parameter space fell below the ICC threshold, with many also exceeding the CV threshold substantially.
+
+\subsection{Spatial Parameters: Stride Length}
+Stride length was the most consistently reliable parameter. Under single-task conditions, four of five participants achieved CV $<$ 10\% on at least one foot. Participants~05 and~06 exhibited the strongest performance, with bilateral CVs of 3.0\% and 5.0\% (P05) and 4.2\% and 5.9\% (P06). Participant~01 also performed well (7.6\% left, 6.0\% right). Participant~03 was the sole outlier for this parameter, with a left-foot stride length CV of 11.3\%. Under dual-task conditions, stride length CVs increased across the board, with only P01 and P06 maintaining both feet below or near 10\%.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{"CV_ST_left.jpeg"}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{"CV_ST_right.jpeg"}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{"CV_DT_right.jpeg"}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{"CV_DT_left.jpeg"}
+\caption{Mean CV (\%) per spatiotemporal parameter, stratified by foot (left/right) and condition (ST/DT), across all participants. The dashed line indicates the 10\% reliability threshold.}
+\label{fig:cv}
+\end{figure}
+\subsection{Temporal Event-Derived Parameters}
+Parameters derived from heel-strike and toe-off event detection—swing time, stance time, step time, and double-support time—showed systematic and severe failure for the majority of participants. Even under single-task conditions, P03 and P04 produced stance time CVs of 53.5\% and 52.7\% on the left foot, and 37.4\% and 43.2\% on the right. These values are physiologically implausible for healthy young adults walking at a self-selected pace and reflect tracking instability rather than genuine gait variability. Swing times followed the same pattern, with P03 and P04 reaching 28.7\% and 34.6\% on the left foot in the single-task condition alone.
+
+By contrast, P06 achieved stance time CVs of 3.8\% (left) and 4.0\% (right) in the single-task condition, and maintained these below 5.7\% even under dual-task load—demonstrating that the pipeline is capable of reliable temporal event detection when pose estimation remains stable throughout the trial. P01 showed a mixed profile: stride-level parameters (stride lengths and stride times) were acceptable, but double-support time on the right foot was already at 37.7\% in the single-task condition, indicating that compound temporal parameters involving two sequential events are more vulnerable to accumulating tracking error.
+
+\subsection{Left–Right Asymmetry}
+A consistent left–right asymmetry was observed across participants and parameters. Left-foot CVs were systematically higher than right-foot CVs in most cases. In the single-task condition, left-foot swing time CVs exceeded right-foot values for P01 (6.7\% vs. 4.7\%), P03 (28.7\% vs. 16.1\%), P04 (34.6\% vs. 30.8\%), and P05 (26.2\% vs. 2.5\%). This asymmetry is consistent with sagittal-plane occlusion effects: in a fixed lateral camera setup, the far-side (typically left) limb is partially occluded by the torso during the swing phase, reducing keypoint localization confidence relative to the near-side limb.
+
+\subsection{Dual-Task Condition Degradation}
+Moving from single-task to dual-task conditions, CVs increased for nearly all parameters across all participants. The mean DTC on stride length ranged from $-0.1\%$ (P06, no detectable change) to $27.8\%$ (P03). However, the large DTC observed in P03 is unlikely to reflect genuine cognitive-induced gait slowing; the stride length CV for P03 jumped from 11.3\% to 22.8\% on the left foot under dual-task, indicating that tracking degradation—rather than actual gait modification—is the dominant source of variance. P06, the participant with the most stable tracking, showed near-zero DTC on all mean parameters (stride length: $-0.1\%$, stride time: $1.1\%$, speed: $-1.7\%$), making it impossible to determine from this participant alone whether the pipeline is insensitive to real cognitive-motor changes or whether the dual-task paradigm simply did not produce meaningful gait changes in that individual.
+
+\subsection{ICC Results}
+ICC(1,1) values were low across the full parameter space. For the single-task condition, the highest values were observed for right-foot stride times (0.633) and right-foot stride lengths (0.592). All temporal event-derived parameters returned ICC values below 0.25 in ST, with many falling below 0.10. Under dual-task conditions, the ICC for right-foot stride lengths improved to 0.659—the only parameter to cross the 0.6 threshold in that condition—while all other parameters remained well below acceptable reliability levels.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{"icc.jpeg"}
+\caption{ICC(1,1) values per spatiotemporal parameter, stratified condition (ST/DT), across all participants. The reliability threshold of 0.6 is between the two dashed lines at 0.75 and 0.5.}
+\label{fig:icc}
+\end{figure}
+
+\section{Conclusion}
+
+This study evaluated the reliability of a monocular markerless motion capture pipeline (Sports2D with RTMPose) for quantifying temporal gait modifications under cognitive dual-task loading in five healthy adults. The primary finding is that the pipeline achieves acceptable measurement reliability only for stride length under single-task conditions, and only in participants where pose estimation remained stable throughout the trial. Temporal event-derived parameters—stance time, swing time, step time, and double-support time—failed to meet reliability thresholds in the majority of participants, even under the simpler single-task walking condition.
+
+The failure mode is identifiable and mechanistically consistent. Stride length is computed from the positional displacement of keypoints across a full stride cycle and is therefore tolerant of moderate frame-level tracking jitter. Temporal parameters, by contrast, require the precise detection of heel-strike and toe-off events—inflection points in the vertical trajectory of foot keypoints. When RTMPose keypoint localization is noisy, these inflection points become ambiguous, and the resulting gait event timestamps are unreliable. The 50\%+ stance time CVs observed in P03 and P04 under single-task conditions illustrate how completely event-based temporal estimation can collapse when tracking is unstable, independent of any cognitive manipulation.
+
+The between-participant variance itself is informative. Participant~06, who produced bilateral stance time CVs below 4\% and stride length CVs below 6\% in both conditions, demonstrates that the pipeline architecture is sound when its input—pose estimation quality—is adequate. The contrast between P06 and P03 or P04 suggests that recording conditions (lighting, clothing contrast, participant body morphology, or walking speed) exert a controlling influence on pipeline reliability that currently exceeds the influence of the gait parameter being measured.
+
+Regarding the central research question—whether the pipeline can detect cognitive-induced temporal gait changes—the answer is that it cannot be determined from the present data. The DTC values obtained are not interpretable as genuine cognitive-motor effects because the measurement noise in most participants is large enough to dominate any real signal. Even the mean parameter DTC values (e.g., P03 stride length DTC of 27.8\%) are confounded by condition-dependent changes in tracking quality rather than reflecting actual gait slowing. Only a participant whose tracking is stable across both conditions simultaneously—as P06 partially demonstrates—could yield a reliable DTC estimate, and even P06 showed near-zero changes that may reflect non-response to the paradigm rather than pipeline sensitivity.
+
+\section{Future Work}
+
+Three concrete directions would advance the validation of this pipeline. First, a systematic characterization of recording condition effects is needed. The between-participant variance observed here—particularly the contrast between P06 and P03/P04—motivates a controlled study in which lighting intensity, clothing contrast (dark vs. light, tight-fitting vs. loose), and participant anthropometrics are varied systematically while tracking quality is monitored via keypoint confidence scores. This would establish the minimum recording standards under which the pipeline produces reliable output, enabling its deployment to be conditioned on verifiable criteria rather than post-hoc reliability checks.
+
+Second, the heel-strike and toe-off detection method should be replaced or augmented. The current approach—detecting local minima in vertical keypoint trajectories—is sensitive to pose estimation noise by design, since a noisy trajectory produces spurious local minima. Learned gait event detectors trained on video-derived keypoint signals, or lightweight IMU-video fusion approaches in which a single ankle IMU provides ground-truth event timestamps while the video pipeline handles spatial parameters, would directly address the identified failure mode without requiring hardware-intensive 3D capture.
+
+Third, validation against a synchronized ground-truth reference is essential before clinical use can be considered. The DUO-GAIT dataset [1] was the intended reference in this study's design, but per-participant comparison was not achievable without synchronized video and IMU recordings. Collecting a dataset in which the Sports2D pipeline and a calibrated IMU array run simultaneously on the same participants—across both single-task and dual-task conditions—would allow per-stride error quantification against a gold standard, yielding the mean absolute error and minimal detectable change estimates necessary to characterize the pipeline's clinical utility for cognitive–motor assessment.
+
+\begin{thebibliography}{00}
+
+\bibitem{Duo}
+L. Zhou, E. Fischer, C. M. Brahms, U. Granacher, and B. Arnrich,
+"DUO-GAIT: A gait dataset for walking under dual-task and fatigue
+conditions with inertial measurement units," Sci. Data, vol. 10, p. 543,
+Aug. 2023, doi: 10.1038/s41597-023-02391-w.
+
+\bibitem{2danalysis}
+J. Stenum, C. Rossi, and R. T. Roemmich, "Two-dimensional video-
+based analysis of human gait using pose estimation," PLOS Comput.
+Biol., vol. 17, no. 4, p. e1008935, Apr. 2021, doi: 10.1371/jour-
+nal.pcbi.1008935.
+
+
+\bibitem{Rtm}
+T. Jiang, P. Lu, L. Zhang, N. Ma, R. Han, C. Lyu, Y. Li, and
+K. Chen, "RTMPose: Real-time multi-person pose estimation based
+on MMPose," arXiv:2303.07399, Mar. 2023. [Online]. Available:
+https://arxiv.org/abs/2303.07399
+
+\bibitem{sport2d}
+D. Pagnon and H. Kim, "Sports2D: Compute 2D human pose and angles
+from a video or a webcam," J. Open Source Softw., vol. 9, no. 101, p.
+6849, Sep. 2024, doi: 10.21105/joss.06849.
+
+\bibitem{compare}
+E. P. Washabaugh, T. A. Shanmugam, R. Ranganathan, and C. Krishnan,
+"Comparing the accuracy of open-source pose estimation methods for
+measuring gait kinematics," Gait Posture, vol. 97, pp. 188–195, Sep.
+2022, doi: 10.1016/j.gaitpost.2022.08.008.
+
+
+
+\bibitem{validity}
+K. L. Leung et al., "Validity and reliability of gait speed and knee flexion
+estimated by a novel vision-based smartphone application," Sensors, vol.
+24, no. 23, p. 7625, Nov. 2024, doi: 10.3390/s24237625.
+
+\end{thebibliography}
+\end{document}
