@@ -56,8 +56,18 @@ from gait import dtc_calculator
 
 logger = logging.getLogger(__name__)
 
-# Required files per participant folder
-_REQUIRED_FILES = ["single.mp4", "dual.mp4", "single.csv", "dual.csv", "master.csv"]
+# Required files per participant folder (CSVs only — video extension is flexible)
+_REQUIRED_FILES = ["single.csv", "dual.csv", "master.csv"]
+_VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv")
+
+
+def _find_video(folder: Path, stem: str) -> Optional[Path]:
+    """Find a video file named `stem` with any accepted extension."""
+    for ext in _VIDEO_EXTENSIONS:
+        candidate = folder / f"{stem}{ext}"
+        if candidate.exists():
+            return candidate
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +127,11 @@ def validate_participant_folder(folder: Path) -> list[str]:
     for fname in _REQUIRED_FILES:
         if not (folder / fname).exists():
             missing.append(fname)
+    # Check for video files with any accepted extension
+    if _find_video(folder, "single") is None:
+        missing.append(f"single{{{','.join(_VIDEO_EXTENSIONS)}}}")
+    if _find_video(folder, "dual") is None:
+        missing.append(f"dual{{{','.join(_VIDEO_EXTENSIONS)}}}")
     return missing
 
 
@@ -167,11 +182,18 @@ def parse_master_csv(csv_path: Path) -> dict:
 def build_participant_config(folder: Path) -> ParticipantConfig:
     """Build a ParticipantConfig from a validated folder."""
     meta = parse_master_csv(folder / "master.csv")
+    st_video = _find_video(folder, "single")
+    dt_video = _find_video(folder, "dual")
+    if st_video is None or dt_video is None:
+        raise FileNotFoundError(
+            f"No video files found for single/dual in {folder}. "
+            f"Accepted extensions: {_VIDEO_EXTENSIONS}"
+        )
     return ParticipantConfig(
         participant_id=f"sub_{folder.name}",
         folder=folder,
-        st_video=folder / "single.mp4",
-        dt_video=folder / "dual.mp4",
+        st_video=st_video,
+        dt_video=dt_video,
         st_boundaries_csv=folder / "single.csv",
         dt_boundaries_csv=folder / "dual.csv",
         height_m=meta["height"],
@@ -188,7 +210,6 @@ def build_participant_config(folder: Path) -> ParticipantConfig:
 def run_single_participant_sync(
     config: ParticipantConfig,
     output_dir: Path,
-    progress_callback: Optional[Callable] = None,
 ) -> dict:
     """
     Run the full pipeline for one participant synchronously.
@@ -732,10 +753,13 @@ class BatchPipelineRunner(QThread):
                 # Run synchronously in this thread
                 runner.run()
 
-                configs.append(cfg)
-                all_results.append(runner._results)
-
-                self.participant_complete.emit(pid, idx + 1, total)
+                # Only count as success if the final stage produced results
+                if "dtc" in runner._results and runner._results["dtc"] is not None:
+                    configs.append(cfg)
+                    all_results.append(runner._results)
+                    self.participant_complete.emit(pid, idx + 1, total)
+                else:
+                    logger.warning(f"Pipeline for {pid} did not complete — skipping.")
 
             except Exception as e:
                 logger.error(f"Pipeline failed for {pid}: {e}")

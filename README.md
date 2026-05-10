@@ -12,7 +12,6 @@ A Python application for computing temporal gait parameters and Dual-Task Cost (
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Usage — GUI (Recommended)](#usage--gui-recommended)
-- [Usage — Command Line (Batch Mode)](#usage--command-line-batch-mode)
 - [Pipeline Stages](#pipeline-stages)
 - [Computed Parameters](#computed-parameters)
 - [Dual-Task Cost (DTC)](#dual-task-cost-dtc)
@@ -137,12 +136,6 @@ python run_ui.py
 5. Click **Run Analysis**.
 6. View results in the tabbed panel on the right.
 
-### CLI Mode (Batch Processing)
-
-```bash
-python main.py --config participant_config.json
-```
-
 ---
 
 ## Usage — GUI (Recommended)
@@ -243,46 +236,6 @@ A filterable, sortable table showing every stride from both conditions with all 
 
 ---
 
-## Usage — Command Line (Batch Mode)
-
-For processing multiple participants without the GUI:
-
-```bash
-python main.py --config participant_config.json
-```
-
-### Config File Format
-
-```json
-{
-  "output_dir": "./results",
-  "apply_filter": false,
-  "interruptions_csv": "",
-  "participants": [
-    {
-      "participant_id": "sub_01",
-      "st_trc": "/path/to/sub01_ST_m_person00.trc",
-      "dt_trc": "/path/to/sub01_DT_m_person00.trc",
-      "height_m": 1.72,
-      "fps": 120
-    },
-    {
-      "participant_id": "sub_02",
-      "st_trc": "/path/to/sub02_ST_m_person00.trc",
-      "dt_trc": "/path/to/sub02_DT_m_person00.trc",
-      "height_m": 1.68,
-      "fps": 120
-    }
-  ]
-}
-```
-
-See [Configuration Reference](#configuration-reference) for all options.
-
-A combined `summary_table.csv` is generated in the output directory with DTC results across all participants.
-
----
-
 ## Pipeline Stages
 
 The pipeline executes the following stages sequentially:
@@ -355,7 +308,7 @@ All outputs are saved in `<output_dir>/<participant_id>/`:
 | `06_dtc.csv` | DTC values for all parameters |
 | `07_dtc_summary.csv` | Human-readable DTC summary table |
 
-When running in batch mode (CLI), an additional `summary_table.csv` is generated in the root output directory combining results across all participants.
+When running in batch mode (GUI), an additional `summary_table.csv` is generated in the root output directory combining results across all participants.
 
 When video input is used, a `sports2d_st/` or `sports2d_dt/` subdirectory contains the Sports2D output files and processing logs.
 
@@ -493,7 +446,6 @@ DualTaskTemporalGaitAnalysis/
 ├── ui/                        # Desktop application UI
 │   └── main_window.py         #   Main window and all UI components
 ├── run_ui.py                  # GUI application entry point
-├── main.py                    # CLI batch processing entry point
 ├── requirements.txt           # Python dependencies
 └── README.md                  # This file
 ```

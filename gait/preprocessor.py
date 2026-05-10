@@ -54,21 +54,20 @@ _COORD_COLS = [
 
 # Default Butterworth parameters — match Sports2D Config_demo.toml defaults
 # and Stenum et al. / DUO-GAIT preprocessing approach
-_DEFAULT_CUTOFF_HZ = 6.0
+_DEFAULT_CUTOFF_HZ = 3.0
 _DEFAULT_ORDER     = 4
 
 
 def preprocess(
     traj_df: pd.DataFrame,
-    fps: float = 120.0,
+    fps: float = 30.0,
     apply_filter: bool = False,
     cutoff_hz: float = _DEFAULT_CUTOFF_HZ,
     order: int = _DEFAULT_ORDER,
-    ensure_y_up: bool = True,
     force_invert_y: bool = False,
 ) -> pd.DataFrame:
     """
-    Optionally filter trajectory data and ensure the coordinate convention.
+    Optionally filter trajectory data and apply Y-axis inversion.
 
     Parameters
     ----------
@@ -85,16 +84,9 @@ def preprocess(
         DUO-GAIT / Stenum et al.
     order : int
         Filter order. Default 4 (zero-phase, so effective order is 8).
-    ensure_y_up : bool
-        If True (default), verify that the median heel-Y value is positive
-        (indicating Y-up convention from Sports2D metres output).  If the
-        median is negative, negate all Y columns so that ground is near 0 and
-        "up" is positive.  This guards against accidentally loading a
-        pixel-coordinate TRC where Y increases downward.
     force_invert_y : bool
-        If True, unconditionally negate all Y columns regardless of the
-        ensure_y_up heuristic.  Use this for subjects whose Sports2D output
-        has an inverted Y-axis that the automatic heuristic does not catch.
+        If True, negate all Y columns.  Use this for subjects whose
+        trajectory graphs appear vertically flipped.
 
     Returns
     -------
@@ -105,18 +97,11 @@ def preprocess(
     df = traj_df.copy()
 
     # ------------------------------------------------------------------
-    # 1. Y-axis orientation check
+    # 1. Y-axis inversion (manual only)
     # ------------------------------------------------------------------
     if force_invert_y:
-        # Manual override: unconditionally negate all Y columns
         y_cols = [c for c in df.columns if c.endswith("_y")]
         df[y_cols] = -df[y_cols]
-    elif ensure_y_up:
-        median_heel_y = np.nanmedian(df["left_heel_y"].values)
-        if median_heel_y < 0:
-            # Y is likely downward — negate all Y columns
-            y_cols = [c for c in df.columns if c.endswith("_y")]
-            df[y_cols] = -df[y_cols]
 
     # ------------------------------------------------------------------
     # 2. Filtering (no-op by default)

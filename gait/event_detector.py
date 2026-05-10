@@ -63,10 +63,10 @@ _IC_PROMINENCE_M = 0.005
 # NOT FOUND IN DUO-GAIT SOURCE (domain-translated) — ASSUMPTION: 0.008 m
 _FO_PROMINENCE_M = 0.008
 
-# Minimum number of frames between successive IC events of the same foot.
-# At 120 fps, a stride shorter than 0.5 s (60 frames) is physiologically
-# implausible; guards against double-detections.
-# NOT FOUND IN DUO-GAIT SOURCE — ASSUMPTION based on ~0.5 s minimum stride
+# Minimum seconds between successive IC events of the same foot.
+# A stride shorter than 0.70 s is physiologically implausible for normal
+# walking; guards against double-detections within the same gait cycle.
+# NOT FOUND IN DUO-GAIT SOURCE — ASSUMPTION based on gait physiology
 _MIN_IC_DISTANCE_S = 0.70  # seconds (real-time minimum between heel strikes)
 
 # Minimum seconds between successive FO events (real-time)

@@ -187,6 +187,8 @@ def load_trc(trc_path: str | Path, fps: float = 120.0) -> tuple[pd.DataFrame, fl
             f"{expected_cols} (2 + 3×{n_markers} markers)."
         )
 
+    # Drop rows where frame number is NaN (malformed TRC rows)
+    data.dropna(subset=[data.columns[0]], inplace=True)
     frame_col = data.iloc[:, 0].astype(int)
     time_col  = data.iloc[:, 1]
 

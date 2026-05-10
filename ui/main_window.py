@@ -331,6 +331,15 @@ class InputPanel(QWidget):
         )
         cb_row.addWidget(self.segment_mode_cb)
 
+        self.smooth_cb = QCheckBox("Smooth Trajectories")
+        self.smooth_cb.setChecked(True)
+        self.smooth_cb.setToolTip(
+            "Apply a 6 Hz Butterworth low-pass filter to\n"
+            "trajectory data before event detection.\n"
+            "Reduces noise-induced false heel-strike / toe-off events."
+        )
+        cb_row.addWidget(self.smooth_cb)
+
         self.invert_y_cb = QCheckBox("Invert Y-Axis")
         self.invert_y_cb.setChecked(False)
         self.invert_y_cb.setToolTip(
@@ -418,6 +427,7 @@ class InputPanel(QWidget):
             "save_video":     self.save_video_cb.isChecked(),
             "segment_mode":   self.segment_mode_cb.isChecked(),
             "invert_y":       self.invert_y_cb.isChecked(),
+            "apply_filter":   self.smooth_cb.isChecked(),
         }
         if not config["st_input"] or not config["dt_input"]:
             QMessageBox.warning(self, "Missing Input", "Please provide ST and DT file paths.")
@@ -1016,7 +1026,6 @@ class DiagnosticsTab(QWidget):
         clean_strides_dt: "pd.DataFrame | None" = None,
         boundaries_csv_st: str = "",
         boundaries_csv_dt: str = "",
-        speed_factor: float = 1.0,
     ):
         """Load all diagnostic data. Call after pipeline finishes."""
         self._data = {}
@@ -1409,6 +1418,7 @@ class MainWindow(QMainWindow):
             save_video     = config.get("save_video", False),
             segment_mode   = config.get("segment_mode", False),
             invert_y       = config.get("invert_y", False),
+            apply_filter   = config.get("apply_filter", True),
         )
         self._runner.progress.connect(self._on_progress)
         self._runner.finished.connect(self._on_finished)
@@ -1447,7 +1457,6 @@ class MainWindow(QMainWindow):
                 clean_strides_dt=results.get("remove_outliers_dt"),
                 boundaries_csv_st=self._runner.st_boundaries_csv if self._runner else "",
                 boundaries_csv_dt=self._runner.dt_boundaries_csv if self._runner else "",
-                speed_factor=self._runner.speed_factor if self._runner else 1.0,
             )
 
             dtc_payload = results.get("dtc", {})
@@ -1545,14 +1554,15 @@ class MainWindow(QMainWindow):
         dtc_df        = _read_csv("06_dtc.csv")
         dtc_summary   = _read_csv("07_dtc_summary.csv")
 
-        # Apply the same preprocessing (Y-axis correction) as the live pipeline
+        # Apply the same preprocessing (Y-axis correction + smoothing) as the live pipeline
         from gait import preprocessor
         invert_y = run_cfg.get("invert_y", False)
+        apply_filter = run_cfg.get("apply_filter", True)
         fps = run_cfg.get("fps", 30.0)
         if traj_st is not None and not traj_st.empty:
-            traj_st = preprocessor.preprocess(traj_st, fps=fps, force_invert_y=invert_y)
+            traj_st = preprocessor.preprocess(traj_st, fps=fps, force_invert_y=invert_y, apply_filter=apply_filter)
         if traj_dt is not None and not traj_dt.empty:
-            traj_dt = preprocessor.preprocess(traj_dt, fps=fps, force_invert_y=invert_y)
+            traj_dt = preprocessor.preprocess(traj_dt, fps=fps, force_invert_y=invert_y, apply_filter=apply_filter)
 
         # Populate tabs
         self._st_tab.load_data(strides_clean_st)
@@ -1569,7 +1579,6 @@ class MainWindow(QMainWindow):
             clean_strides_dt=strides_clean_dt,
             boundaries_csv_st=boundaries_st,
             boundaries_csv_dt=boundaries_dt,
-            speed_factor=speed_factor,
         )
 
         if dtc_df is not None and dtc_summary is not None:
@@ -1611,16 +1620,28 @@ class MainWindow(QMainWindow):
 
         run_cfg = json.loads(config_path.read_text(encoding="utf-8"))
 
-        # Find cached merged TRCs
-        st_trc = out / "sports2d_st" / "merged_person00.trc"
-        dt_trc = out / "sports2d_dt" / "merged_person00.trc"
-        if not st_trc.is_file() or not dt_trc.is_file():
+        # Find cached TRCs — prefer merged (segment mode), fall back to full-video
+        def _find_trc(cond):
+            merged = out / f"sports2d_{cond}" / "merged_person00.trc"
+            if merged.is_file():
+                return merged
+            # Full-video mode: *_m_person*.trc
+            session = out / f"sports2d_{cond}"
+            if session.is_dir():
+                hits = sorted(session.rglob("*_m_person*.trc"))
+                if hits:
+                    return hits[0]
+            return None
+
+        st_trc = _find_trc("st")
+        dt_trc = _find_trc("dt")
+        if st_trc is None or dt_trc is None:
             QMessageBox.warning(
                 self, "Missing TRC",
-                f"Cached TRC files not found in:\n{out}\n\n"
-                "Expected:\n"
-                f"  {st_trc}\n"
-                f"  {dt_trc}"
+                f"No cached TRC files found in:\n{out}\n\n"
+                "Expected either merged_person00.trc (segment mode)\n"
+                "or *_m_person*.trc (full-video mode) in\n"
+                f"  sports2d_st/ and sports2d_dt/"
             )
             return
 
@@ -1646,6 +1667,7 @@ class MainWindow(QMainWindow):
             "save_video":        False,
             "segment_mode":      False,
             "invert_y":          run_cfg.get("invert_y", False),
+            "apply_filter":      run_cfg.get("apply_filter", True),
         }
 
         self.setWindowTitle(f"Gait Analysis — {config['participant_id']} (rerunning…)")

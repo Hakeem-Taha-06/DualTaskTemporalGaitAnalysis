@@ -263,6 +263,13 @@ def stitch_trc_files(
     For each segment's TRC, timestamps are offset by the segment's original
     ``start_s`` value so that the merged file uses the original video timeline.
 
+    .. note::
+        Frame numbers in the merged TRC are renumbered sequentially (0, 1, 2, …)
+        rather than preserving the original video frame numbers.  Timestamps are
+        correctly mapped to the original timeline, so all time-based calculations
+        remain valid.  Do not use merged frame numbers to index into original
+        video frames.
+
     Parameters
     ----------
     trc_paths : list[Path]

@@ -40,30 +40,17 @@ Output: same schema as parameter_calculator output, with added columns:
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 import pandas as pd
 
 
-# Turning interval expansion — EXACT value from DUO-GAIT
-# features/postprocessing.py line 97 called with interval_size=2
-_TURNING_INTERVAL_SIZE = 2
-
-# Turning detection threshold (video domain)
-# NOT FOUND IN DUO-GAIT SOURCE — ASSUMPTION:
-# A stride is a turning stride if net anterior-posterior heel displacement
-# is less than this value (the foot moved sideways rather than forward).
-_TURNING_MIN_AP_DISPLACEMENT_M = 0.05
 
 
 def remove_outliers(
     strides_df: pd.DataFrame,
     traj_df: pd.DataFrame,
     boundaries_csv: str = "",
-    interruptions_df: Optional[pd.DataFrame] = None,
-    interval_size: int = _TURNING_INTERVAL_SIZE,
-    turning_min_ap_m: float = _TURNING_MIN_AP_DISPLACEMENT_M,
+    speed_factor: float = 1.0,
 ) -> pd.DataFrame:
     """
     Post-process stride data by marking boundary strides for exclusion.
@@ -83,8 +70,8 @@ def remove_outliers(
     boundaries_csv : str
         Path to a CSV with columns ``time_s, event`` where event is
         ``"enter"`` or ``"exit"``.  Empty string → no boundary exclusion.
-    interruptions_df, interval_size, turning_min_ap_m
-        Legacy parameters — retained for API compatibility but not used.
+    speed_factor : float
+        Playback speed factor, used to scale the boundary margin.
 
     Returns
     -------
@@ -111,7 +98,7 @@ def remove_outliers(
     # Boundary stride exclusion
     # ------------------------------------------------------------------
     if boundaries_csv:
-        df = _mark_boundary_strides(df, boundaries_csv)
+        df = _mark_boundary_strides(df, boundaries_csv, speed_factor=speed_factor)
 
     return df
 
@@ -124,6 +111,7 @@ def _mark_boundary_strides(
     df: pd.DataFrame,
     csv_path: str,
     margin_s: float = 1.0,
+    speed_factor: float = 1.0,
 ) -> pd.DataFrame:
     """
     Parse an enter/exit timestamp CSV and mark boundary strides.
@@ -151,8 +139,17 @@ def _mark_boundary_strides(
     ----------
     margin_s : float
         Seconds of data to exclude around each boundary event.  Default 1.0.
+        Scaled by speed_factor for slow-motion recordings.
+    speed_factor : float
+        Playback speed factor (e.g. 8.0 for 240fps→30fps slow-motion).
+        The margin is multiplied by this to maintain the same real-time
+        exclusion window regardless of playback speed.
     """
     from pathlib import Path
+
+    # Scale margin for slow-motion: 1.0s video-time at 8× = 0.125s real-time,
+    # so we multiply by speed_factor to keep the real-time margin constant
+    effective_margin = margin_s * speed_factor
 
     path = Path(csv_path)
     if not path.exists() or path.stat().st_size == 0:
@@ -194,11 +191,11 @@ def _mark_boundary_strides(
     for ev in events:
         t = ev["time_s"]
         if ev["event"] == "enter":
-            mask = (df["timestamps"] >= t) & (df["timestamps"] <= t + margin_s)
+            mask = (df["timestamps"] >= t) & (df["timestamps"] <= t + effective_margin)
             df.loc[mask, "is_outlier"] = True
             df.loc[mask, "removal_reason"] = "boundary_enter"
         elif ev["event"] == "exit":
-            mask = (df["timestamps"] >= t - margin_s) & (df["timestamps"] <= t)
+            mask = (df["timestamps"] >= t - effective_margin) & (df["timestamps"] <= t)
             df.loc[mask, "is_outlier"] = True
             df.loc[mask, "removal_reason"] = "boundary_exit"
 
@@ -213,135 +210,3 @@ def _mark_boundary_strides(
 
     return df
 
-
-# ---------------------------------------------------------------------------
-# Turning stride detection
-# ---------------------------------------------------------------------------
-
-def _detect_turning_strides(
-    df: pd.DataFrame,
-    traj_df: pd.DataFrame,
-    turning_min_ap_m: float,
-) -> pd.DataFrame:
-    """
-    Mark strides as turning_step if the net AP heel displacement is small.
-    This is the video-domain analogue of DUO-GAIT's angle_change > 0.2 check.
-
-    # NOT FOUND IN DUO-GAIT SOURCE (domain translation)
-    # ASSUMPTION: turning stride = net AP displacement < turning_min_ap_m
-    """
-    frame_to_row = {f: i for i, f in enumerate(traj_df["frame"].values)}
-
-    for idx in df.index:
-        side = df.at[idx, "foot"]
-        # stride spans from IC[i] (timestamps → frame via fo/ic_samples) to IC[i+1]
-        ic_start_sample = _nearest_frame(
-            traj_df, df.at[idx, "timestamps"]
-        )
-        ic_end_sample = int(df.at[idx, "ic_samples"])
-
-        x_col = f"{side}_heel_x"
-        try:
-            row_start = frame_to_row[ic_start_sample]
-            row_end   = frame_to_row[ic_end_sample]
-        except KeyError:
-            continue
-
-        ap_disp = abs(traj_df[x_col].iat[row_end] - traj_df[x_col].iat[row_start])
-        if ap_disp < turning_min_ap_m:
-            df.at[idx, "turning_step"] = True
-            df.at[idx, "is_outlier"]   = True
-
-    return df
-
-
-def _nearest_frame(traj_df: pd.DataFrame, time_s: float) -> int:
-    """Return the frame number closest to time_s."""
-    idx = (traj_df["time_s"] - time_s).abs().idxmin()
-    return int(traj_df["frame"].iat[idx])
-
-
-# ---------------------------------------------------------------------------
-# Turning interval expansion
-# DUO-GAIT: features/postprocessing.py lines 20-48
-# ---------------------------------------------------------------------------
-
-def _mark_turning_interval(df: pd.DataFrame, interval_size: int) -> pd.DataFrame:
-    """
-    Replicate DUO-GAIT mark_turning_interval() exactly.
-    Source: features/postprocessing.py lines 20-48.
-
-    For each turning_step at index x, marks indices
-    [x - interval_size, …, x + interval_size] as turning_interval.
-    Also marks the first and last interval_size strides of the session
-    (line 45-46 in DUO-GAIT), BUT only when there are enough strides
-    that this won't eliminate all data.
-    Applied per foot (DUO-GAIT processes each foot's CSV independently).
-    """
-    for side in ("left", "right"):
-        mask    = df["foot"] == side
-        sub_idx = df.index[mask].tolist()      # positional indices within df
-        if not sub_idx:
-            continue
-
-        n_strides = len(sub_idx)
-
-        # Positions of turning steps within this foot's stride list
-        ts_positions = [
-            i for i, gi in enumerate(sub_idx)
-            if df.at[gi, "turning_step"]
-        ]
-
-        turning_positions: set[int] = set()
-        for pos in ts_positions:
-            # interval around each turning step (lines 33-36)
-            turning_positions.update(
-                range(pos - interval_size, pos + interval_size + 1)
-            )
-
-        # Clip to valid range (lines 37-39)
-        all_positions = set(range(n_strides))
-        turning_positions &= all_positions
-
-        # Head and tail strides (lines 45-46)
-        # Skip this for short recordings where it would remove too much data.
-        # DUO-GAIT was designed for 200+ stride walk tests; for short videos
-        # with few strides per foot, trimming head/tail would eliminate most
-        # or all data.  Only apply when we have enough strides that removing
-        # 2×interval_size leaves at least half the data.
-        if n_strides > 4 * interval_size:
-            head_tail = list(range(interval_size)) + list(
-                range(n_strides - interval_size, n_strides)
-            )
-            turning_positions.update(p for p in head_tail if p in all_positions)
-
-        for pos in turning_positions:
-            df.at[sub_idx[pos], "turning_interval"] = True
-
-    return df
-
-
-# ---------------------------------------------------------------------------
-# Interrupted strides
-# DUO-GAIT: features/postprocessing.py lines 51-84
-# ---------------------------------------------------------------------------
-
-def _mark_interrupted_strides(
-    df: pd.DataFrame,
-    interruptions_df: pd.DataFrame,
-) -> pd.DataFrame:
-    """
-    Mark strides whose timestamps fall within any [start_s, end_s] interval.
-    Replicates DUO-GAIT mark_interrupted_strides() (postprocessing.py:51-84).
-
-    interruptions_df must have columns: start_s, end_s.
-    (DUO-GAIT uses 'start(s)' and 'end(s)' column names — renamed here for
-    Python-friendliness.)
-    """
-    df["interrupted"] = False
-    for _, row in interruptions_df.iterrows():
-        start_s = float(row["start_s"])
-        end_s   = float(row["end_s"])
-        mask = (df["timestamps"] >= start_s) & (df["timestamps"] <= end_s)
-        df.loc[mask, "interrupted"] = True
-    return df

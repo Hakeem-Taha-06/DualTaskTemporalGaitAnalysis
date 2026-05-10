@@ -351,6 +351,7 @@ class PipelineRunner(QThread):
                 self._results["calc_params_st"],
                 self._results["preprocess_st"],
                 boundaries_csv=self.st_boundaries_csv,
+                speed_factor=self.speed_factor,
             )
             df.to_csv(out / "04_strides_cleaned_st.csv", index=False)
             return df
@@ -360,6 +361,7 @@ class PipelineRunner(QThread):
                 self._results["calc_params_dt"],
                 self._results["preprocess_dt"],
                 boundaries_csv=self.dt_boundaries_csv,
+                speed_factor=self.speed_factor,
             )
             df.to_csv(out / "04_strides_cleaned_dt.csv", index=False)
             return df
@@ -420,6 +422,7 @@ class PipelineRunner(QThread):
             "participant_id": self.participant_id,
             "speed_factor": self.speed_factor,
             "invert_y": self.invert_y,
+            "apply_filter": self.apply_filter,
             "fps": self.fps,
             "height_m": self.height_m,
             "st_boundaries_csv": self.st_boundaries_csv,
@@ -433,7 +436,13 @@ class PipelineRunner(QThread):
                                     ("dt", self.dt_boundaries_csv)]:
             if src_path_str and Path(src_path_str).is_file():
                 dst = out / f"_boundaries_{cond}.csv"
-                shutil.copy2(src_path_str, dst)
+                # Skip if source and destination are the same file (Rerun mode)
+                try:
+                    if Path(src_path_str).resolve() == dst.resolve():
+                        continue
+                    shutil.copy2(src_path_str, dst)
+                except (PermissionError, OSError):
+                    pass  # file locked — non-critical, skip silently
 
     # ------------------------------------------------------------------
     # Helpers
@@ -774,7 +783,7 @@ class PipelineRunner(QThread):
                 raise RuntimeError(
                     f"Sports2D failed for {cond} (exit code {proc.returncode}).\n"
                     f"Full log saved to: {log_file}\n\n"
-                    f"stderr (last 1500 chars):\n{proc.stderr[-1500:]}"
+                    f"Output (last 1500 chars):\n{combined_output[-1500:]}"
                 )
 
         if not trc_files:

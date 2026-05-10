@@ -24,14 +24,16 @@ Additional parameters NOT in DUO-GAIT (flagged):
                        # NOT FOUND IN DUO-GAIT SOURCE — computed for completeness
 
 Outlier detection (gait_parameters.py:127-201):
-    angle_change > 0.2  → is_outlier + turning_step
-    stride_length < 0.2 → is_outlier
-    stride_time   > 2.0 → is_outlier
-    stance_ratio  < 0.5 → is_outlier
+    DUO-GAIT reference thresholds vs. our video-adapted thresholds:
+    stride_length < 0.2 m          → is_outlier  (DUO-GAIT: same)
+    stride_time   > 2.5 s          → is_outlier  (DUO-GAIT: 2.0)
+    stride_time   < 0.4 s          → is_outlier  (not in DUO-GAIT)
+    stance_ratio  < 0.1 or > 0.95  → is_outlier  (DUO-GAIT: < 0.5)
     |z-score| > 3 on:   stride_lengths, stride_times, swing_times,
                          stance_times, stance_ratios
-    (angle_change not applicable in video domain; turning detection uses
-     anterior-posterior heel velocity reversal — see outlier_remover.py)
+    Note: stance_ratio bounds relaxed from DUO-GAIT because video-domain
+    toe-off detection (via toe-Y minima) yields systematically different
+    stance ratios than IMU-based detection.
 
 Input:
     gait_events : dict  — output of event_detector.events_to_gait_event_dict()
