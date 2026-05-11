@@ -53,6 +53,7 @@ This tool is designed for researchers and clinicians studying **dual-task gait a
 - **Load / Rerun Analysis** — Rapidly load previous results or re-run downstream analysis on cached TRC data directly from the UI without re-running pose estimation.
 - **Batch Processing** — GUI and command-line mode for processing multiple participants from a dataset directory.
 - **Slow-Motion Support** — Speed factor correction for videos recorded at high FPS and played back at lower FPS.
+- **Reliability Dashboard** — Built-in pipeline to compute Intra-class Correlation (ICC) and Coefficient of Variation (CV) across multiple participants, generating publication-ready charts and an interactive HTML report.
 - **CSV Export** — All intermediate and final results saved as CSV files for further analysis.
 
 ---
@@ -294,6 +295,19 @@ DTC is computed for all aggregated parameter columns (avg, CV, and SI).
 
 ---
 
+## Reliability Analysis
+
+A complete, standalone pipeline for calculating system reliability is included in the `reliability/` folder. It processes the cleaned CSV outputs from multiple volunteers and calculates:
+
+- **Coefficient of Variation (CV)** for within-subject consistency.
+- **Intraclass Correlation Coefficient (ICC 1,1)** for between-subject system reliability.
+
+The reliability pipeline automatically generates a suite of publication-ready boxplots and an interactive HTML dashboard. Both Vertical and AP event detection methods are supported.
+
+> **See the detailed guide in [reliability/README.md](reliability/README.md)** for usage instructions.
+
+---
+
 ## Output Files
 
 All outputs are saved in `<output_dir>/<participant_id>/`:
@@ -443,6 +457,10 @@ DualTaskTemporalGaitAnalysis/
 ├── runners/                   # Pipeline and batch orchestration
 │   ├── pipeline_runner.py     #   Single-participant QThread runner
 │   └── batch_runner.py        #   Multi-participant batch runner
+├── reliability/               # Standalone pipeline for ICC and CV reliability
+│   ├── run_all.py             #   Entry point for reliability analysis
+│   ├── gait_reliability.py    #   Core metrics calculation and plotting
+│   └── generate_dashboard.py  #   Interactive HTML dashboard builder
 ├── ui/                        # Desktop application UI
 │   └── main_window.py         #   Main window and all UI components
 ├── run_ui.py                  # GUI application entry point

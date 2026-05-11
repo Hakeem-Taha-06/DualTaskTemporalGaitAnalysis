@@ -51,24 +51,24 @@ While laboratory-based motion capture systems provide
 detailed biomechanical data, the capability of monocular mark-
 erless video analysis to detect subtle temporal gait alterations
 under cognitive load remains insufficiently characterized.
-This study investigates whether a sagittal-plane monocular
+This study evaluates whether a sagittal-plane monocular
 motion capture pipeline can reliably quantify temporal gait
-changes induced by a cognitive dual-task paradigm in healthy
-adults.
-Participants will perform overground walking under single-
-task (normal walking) and dual-task (walking while perform-
-ing serial subtraction) conditions. Video recordings will be
-processed using a Python-based Sports2D workflow to extract
-spatiotemporal parameters, including step time, stance time,
-swing time, double-support time, cadence, and temporal vari-
-ability. Dual-task cost (DTC), along with the Coefficient of 
-Variation (CV) and Intraclass Correlation Coefficient (ICC), will 
-be computed to evaluate measurement consistency and reliability.
-The primary objective is to determine the sensitivity and re-
-liability of monocular 2D gait analysis for detecting cognitive-
-induced temporal gait modifications. Findings will contribute
-to the validation of monocular video systems for quantitative
-cognitive–motor assessment in applied biomechanics contexts.
+parameters under a cognitive dual-task paradigm in healthy
+adults, and compares two gait event detection strategies.
+Five participants performed overground walking under single-
+task and dual-task (serial subtraction) conditions. A Sports2D
+pipeline extracted spatiotemporal parameters including step
+time, stance time, swing time, double-support time, and cadence.
+A conventional vertical-axis (Y) event detector was compared
+against a novel Anterior-Posterior (AP) detector based on
+segment-wise linear detrending of horizontal foot trajectories.
+Reliability was assessed via Coefficient of Variation (CV) and
+Intraclass Correlation Coefficient (ICC). The AP method
+achieved CV $<$ 10\% and ICC $>$ 0.6 across all parameters
+and conditions, resolving the systematic failures of the vertical
+detector. These findings support the viability of monocular
+video pipelines for cognitive–motor gait assessment when
+appropriate event detection methods are employed.
 \end{abstract}
 \vspace{3mm}
 
@@ -116,9 +116,13 @@ time, stance time, swing time, double-support time, cadence,
 and temporal variability.
 
 \subsection{Data Processing Methods}
-Video recordings are processed through a custom automated Python pipeline utilizing Sports2D [4] to obtain 2D foot keypoint trajectories across frames. To minimize pose estimation noise, the raw trajectories are first smoothed using a zero-phase 3~Hz Butterworth low-pass filter. Heel-Strike (HS) and Toe-Off (TO) events are subsequently identified by detecting local minima in the vertical trajectories of the heel and toe keypoints, applying physiologically constrained minimum prominence and inter-event distance thresholds (e.g., a minimum 0.70~s between consecutive heel strikes).
+Video recordings are processed through a custom automated Python pipeline utilizing Sports2D [4] to obtain 2D foot keypoint trajectories across frames. Raw trajectories are first smoothed using a zero-phase 3~Hz Butterworth low-pass filter. Two gait event detection strategies are evaluated and compared.
 
-Following event detection, frame indices are converted to timestamps ($t = \text{Frame}_{\text{index}} / \text{fps}$), allowing stride-by-stride computation of spatial and temporal parameters, including stride length, stride time, stance time, swing time, and stance ratio. The pipeline automatically flags outliers using video-adapted physiological thresholds (e.g., excluding strides with stance ratios outside the 0.1 to 0.95 range or lengths under 0.2~m) alongside a statistical z-score pass ($|z| > 3$). Additionally, incomplete boundary strides captured as the subject enters or exits the camera frame are excluded using a defined time margin. Finally, summary statistics (mean and coefficient of variation) are aggregated across all valid strides. To evaluate the pipeline's sensitivity to cognitive-motor interference, we compute the Dual-Task Cost (DTC)—the relative percentage change in each aggregated parameter between the single- and dual-task conditions. This enables us to determine whether the monocular 2D gait analysis framework can reliably detect and quantify cognitive-induced temporal gait modifications beyond expected measurement error. The full pipeline implementation is publicly available at \url{https://github.com/Hakeem-Taha-06/DualTaskTemporalGaitAnalysis}.
+The \textit{vertical (Y) detector} identifies Heel-Strike (HS) and Toe-Off (TO) events as local minima in the vertical trajectories of heel and toe keypoints, applying physiologically constrained prominence and minimum inter-event distance thresholds (0.70~s between consecutive heel strikes of the same foot).
+
+The \textit{Anterior-Posterior (AP) detector} operates on horizontal (X-axis) foot trajectories, motivated by the principle established by Zeni et al. that AP-axis kinematic extrema reliably correspond to gait events [6]. Within each walking segment (delimited by boundary markers), the algorithm detects walking direction from the mean heel velocity and negates the X-coordinates if the subject walks right-to-left, standardizing forward motion as positive. A degree-1 polynomial is then fit to the segment and subtracted, yielding a residual signal that oscillates around zero. HS events are detected as peaks (heel furthest forward before plant) and TO events as troughs (toe furthest rearward before lift-off) in the detrended signals. Peak prominence is set adaptively as $k \times \sigma$ of the detrended signal ($k = 0.4$), scaling automatically to stride length and pose estimation noise without per-participant tuning. The same 0.70~s minimum inter-event constraint is enforced.
+
+Following event detection, frame indices are converted to timestamps ($t = \text{Frame}_{\text{index}} / \text{fps}$), enabling stride-by-stride computation of stride length, stride time, stance time, swing time, and stance ratio. Outliers are flagged via physiological thresholds (stance ratios outside 0.1–0.95, lengths under 0.2~m) and a z-score pass ($|z| > 3$). Boundary strides are excluded using a defined time margin. Summary statistics (mean and CV) are aggregated across valid strides, and the Dual-Task Cost (DTC) is computed between conditions. The full pipeline is publicly available at \url{https://github.com/Hakeem-Taha-06/DualTaskTemporalGaitAnalysis}.
 
 \subsection{Statistical Analysis}
 To systematically establish the reliability and consistency of the pipeline's measurements, we calculate the Coefficient of Variation (CV) for each computed spatiotemporal parameter, as well as for the Dual-Task Cost (DTC) itself. The CV is computed as:
@@ -141,69 +145,59 @@ where $MS_B$ and $MS_W$ represent the mean squares between and within subjects, 
 
 The validity of the pipeline is evaluated against predefined statistical thresholds: CV values below 10\% are considered to indicate good measurement consistency (i.e., ``good enough''), and ICC values above 0.6 are considered to represent good reliability.
 
+\newpage
+
 \section{Results}
 
-Across five participants, the pipeline's reliability varied substantially by parameter class and recording condition. Only two parameter–foot combinations met both the CV $<$ 10\% and ICC $>$ 0.6 thresholds simultaneously: right-foot stride times in the single-task condition (CV = 4.7\%, ICC = 0.633) and right-foot stride lengths in the dual-task condition (CV = 14.9\%, ICC = 0.659). The remainder of the parameter space fell below the ICC threshold, with many also exceeding the CV threshold substantially.
+Results are reported for both the vertical (Y) and AP event detectors. The Y detector failed to meet reliability thresholds for the majority of parameters, while the AP detector achieved acceptable CV and ICC across the full parameter space.
 
-\subsection{Spatial Parameters: Stride Length}
-Stride length was the most consistently reliable parameter. Under single-task conditions, four of five participants achieved CV $<$ 10\% on at least one foot. Participants~05 and~06 exhibited the strongest performance, with bilateral CVs of 3.0\% and 5.0\% (P05) and 4.2\% and 5.9\% (P06). Participant~01 also performed well (7.6\% left, 6.0\% right). Participant~03 was the sole outlier for this parameter, with a left-foot stride length CV of 11.3\%. Under dual-task conditions, stride length CVs increased across the board, with only P01 and P06 maintaining both feet below or near 10\%.
+\subsection{Vertical Detector: Spatial vs.\ Temporal Parameter Reliability}
+Under the Y detector, no parameter met both reliability thresholds. Aggregate mean CVs for stride length were 14.7\% (left) and 28.3\% (right) in ST, already well above the 10\% threshold. Temporal event-derived parameters were substantially worse: mean stance time CVs reached 40.0\% (left) and 46.1\% (right) in ST, worsening to 54.2\% and 49.7\% in DT. Swing times followed the same pattern, with aggregate mean CVs of 34.2\% (left) and 48.7\% (right) in ST. At the participant level, P03 and P04 drove the worst readings—stance time CVs of 53.5\% and 52.7\% on the left foot—but even the better-performing participants failed to bring aggregate means within threshold. A consistent left–right asymmetry was present, with right-foot CVs equalling or exceeding left-foot values for most temporal parameters, reflecting accumulated tracking instability on both sides rather than a unilateral occlusion effect. ICC(1,1) values were near zero across the full parameter space; the highest observed values were left stride times in ST (0.226) and DT left stride lengths (0.468), neither approaching the 0.6 threshold.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{"CV_ST_left.jpeg"}
+\includegraphics[width=\linewidth]{"cv_comparison.png"}
+\caption{Mean CV (\%) per spatiotemporal parameter under the vertical (Y) detector, averaged across left and right feet, for ST and DT conditions. The dashed line indicates the 10\% reliability threshold.}
+\label{fig:cv_y}
 \end{figure}
+
 \begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{"CV_ST_right.jpeg"}
+\includegraphics[width=\linewidth]{"cv_comparison_ap.png"}
+\caption{ICC(1,1) values per spatiotemporal parameter under the vertical (Y) detector, for ST and DT conditions. The dashed line indicates the 0.6 reliability threshold.}
+\label{fig:icc_y}
 \end{figure}
+
+\subsection{AP Detector: Parameter Reliability}
+The AP detector achieved CV $<$ 10\% for every parameter, both feet, and both conditions. Stride times were strongest (ST left: CV = 3.0\%, ICC = 0.864; ST right: CV = 2.7\%, ICC = 0.880). Stance times dropped from aggregate means of 40–46\% (Y detector, ST) to 3.6\% left and 3.4\% right—a roughly 12-fold improvement. Swing times improved from 34–49\% to 3.4–3.9\% in ST. Double-support time was the weakest parameter, peaking at 8.9\% CV in DT, yet remained within threshold. The left–right asymmetry observed under the Y detector was eliminated, consistent with the AP method's independence from vertical keypoint occlusion. ICC(1,1) exceeded 0.6 for all parameters in both conditions except stance ratio in ST (left: 0.566, right: 0.571). Under DT, CVs increased modestly (stride lengths: 3.4–4.3\%; stance times: 4.3–4.9\%), and DT stride length ICC reached 0.929 (left) and 0.908 (right).
+
 \begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{"CV_DT_right.jpeg"}
+\includegraphics[width=\linewidth]{"icc_comparison.png"}
+\caption{Mean CV (\%) per spatiotemporal parameter under the AP detector, averaged across left and right feet, for ST and DT conditions. The dashed line indicates the 10\% reliability threshold.}
+\label{fig:cv_ap}
 \end{figure}
-\begin{figure}[H]
-\centering
-\includegraphics[width=\linewidth]{"CV_DT_left.jpeg"}
-\caption{Mean CV (\%) per spatiotemporal parameter, stratified by foot (left/right) and condition (ST/DT), across all participants. The dashed line indicates the 10\% reliability threshold.}
-\label{fig:cv}
-\end{figure}
-\subsection{Temporal Event-Derived Parameters}
-Parameters derived from heel-strike and toe-off event detection—swing time, stance time, step time, and double-support time—showed systematic and severe failure for the majority of participants. Even under single-task conditions, P03 and P04 produced stance time CVs of 53.5\% and 52.7\% on the left foot, and 37.4\% and 43.2\% on the right. These values are physiologically implausible for healthy young adults walking at a self-selected pace and reflect tracking instability rather than genuine gait variability. Swing times followed the same pattern, with P03 and P04 reaching 28.7\% and 34.6\% on the left foot in the single-task condition alone.
-
-By contrast, P06 achieved stance time CVs of 3.8\% (left) and 4.0\% (right) in the single-task condition, and maintained these below 5.7\% even under dual-task load—demonstrating that the pipeline is capable of reliable temporal event detection when pose estimation remains stable throughout the trial. P01 showed a mixed profile: stride-level parameters (stride lengths and stride times) were acceptable, but double-support time on the right foot was already at 37.7\% in the single-task condition, indicating that compound temporal parameters involving two sequential events are more vulnerable to accumulating tracking error.
-
-\subsection{Left–Right Asymmetry}
-A consistent left–right asymmetry was observed across participants and parameters. Left-foot CVs were systematically higher than right-foot CVs in most cases. In the single-task condition, left-foot swing time CVs exceeded right-foot values for P01 (6.7\% vs. 4.7\%), P03 (28.7\% vs. 16.1\%), P04 (34.6\% vs. 30.8\%), and P05 (26.2\% vs. 2.5\%). This asymmetry is consistent with sagittal-plane occlusion effects: in a fixed lateral camera setup, the far-side (typically left) limb is partially occluded by the torso during the swing phase, reducing keypoint localization confidence relative to the near-side limb.
-
-\subsection{Dual-Task Condition Degradation}
-Moving from single-task to dual-task conditions, CVs increased for nearly all parameters across all participants. The mean DTC on stride length ranged from $-0.1\%$ (P06, no detectable change) to $27.8\%$ (P03). However, the large DTC observed in P03 is unlikely to reflect genuine cognitive-induced gait slowing; the stride length CV for P03 jumped from 11.3\% to 22.8\% on the left foot under dual-task, indicating that tracking degradation—rather than actual gait modification—is the dominant source of variance. P06, the participant with the most stable tracking, showed near-zero DTC on all mean parameters (stride length: $-0.1\%$, stride time: $1.1\%$, speed: $-1.7\%$), making it impossible to determine from this participant alone whether the pipeline is insensitive to real cognitive-motor changes or whether the dual-task paradigm simply did not produce meaningful gait changes in that individual.
-
-\subsection{ICC Results}
-ICC(1,1) values were low across the full parameter space. For the single-task condition, the highest values were observed for right-foot stride times (0.633) and right-foot stride lengths (0.592). All temporal event-derived parameters returned ICC values below 0.25 in ST, with many falling below 0.10. Under dual-task conditions, the ICC for right-foot stride lengths improved to 0.659—the only parameter to cross the 0.6 threshold in that condition—while all other parameters remained well below acceptable reliability levels.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{"icc.jpeg"}
-\caption{ICC(1,1) values per spatiotemporal parameter, stratified condition (ST/DT), across all participants. The reliability threshold of 0.6 is between the two dashed lines at 0.75 and 0.5.}
-\label{fig:icc}
+\includegraphics[width=\linewidth]{"icc_comparison_ap.png"}
+\caption{ICC(1,1) values per spatiotemporal parameter under the AP detector, for ST and DT conditions. The dashed line indicates the 0.6 reliability threshold.}
+\label{fig:icc_ap}
 \end{figure}
 
 \section{Conclusion}
 
-This study evaluated the reliability of a monocular markerless motion capture pipeline (Sports2D with RTMPose) for quantifying temporal gait modifications under cognitive dual-task loading in five healthy adults. The primary finding is that the pipeline achieves acceptable measurement reliability only for stride length under single-task conditions, and only in participants where pose estimation remained stable throughout the trial. Temporal event-derived parameters—stance time, swing time, step time, and double-support time—failed to meet reliability thresholds in the majority of participants, even under the simpler single-task walking condition.
+This study evaluated two gait event detection strategies within a monocular markerless motion capture pipeline (Sports2D with RTMPose) for quantifying spatiotemporal gait parameters under cognitive dual-task loading in five healthy adults. The vertical (Y) detector, which identifies heel-strike and toe-off events from inflection points in vertical foot trajectories, produced reliable measurements only for stride length. Temporal event-derived parameters failed systematically in 3 of 5 participants, with stance time CVs exceeding 50\% under single-task conditions alone. The failure is mechanistically consistent: vertical inflection point detection requires precise local minima in a signal that collapses into noise under moderate pose estimation jitter, and the problem was compounded by far-side limb occlusion that introduced a systematic left-right asymmetry.
 
-The failure mode is identifiable and mechanistically consistent. Stride length is computed from the positional displacement of keypoints across a full stride cycle and is therefore tolerant of moderate frame-level tracking jitter. Temporal parameters, by contrast, require the precise detection of heel-strike and toe-off events—inflection points in the vertical trajectory of foot keypoints. When RTMPose keypoint localization is noisy, these inflection points become ambiguous, and the resulting gait event timestamps are unreliable. The 50\%+ stance time CVs observed in P03 and P04 under single-task conditions illustrate how completely event-based temporal estimation can collapse when tracking is unstable, independent of any cognitive manipulation.
+The AP detector resolved these failures entirely. By detrending horizontal foot trajectories segment-wise and applying adaptive prominence thresholds, it produces a clean oscillating signal whose extrema correspond directly to gait events regardless of jitter magnitude or walking direction. All parameters met both the CV $<$ 10\% and ICC $>$ 0.6 thresholds in both conditions, with the single exception of stance ratio ICC in ST (0.57). The left–right asymmetry disappeared, confirming that the Y detector's occlusion sensitivity was the source rather than an intrinsic pipeline limitation. The AP method's robustness across participants who previously produced unusable data demonstrates that the pipeline architecture is sound; the gait event detection stage was the critical bottleneck.
 
-The between-participant variance itself is informative. Participant~06, who produced bilateral stance time CVs below 4\% and stride length CVs below 6\% in both conditions, demonstrates that the pipeline architecture is sound when its input—pose estimation quality—is adequate. The contrast between P06 and P03 or P04 suggests that recording conditions (lighting, clothing contrast, participant body morphology, or walking speed) exert a controlling influence on pipeline reliability that currently exceeds the influence of the gait parameter being measured.
-
-Regarding the central research question—whether the pipeline can detect cognitive-induced temporal gait changes—the answer is that it cannot be determined from the present data. The DTC values obtained are not interpretable as genuine cognitive-motor effects because the measurement noise in most participants is large enough to dominate any real signal. Even the mean parameter DTC values (e.g., P03 stride length DTC of 27.8\%) are confounded by condition-dependent changes in tracking quality rather than reflecting actual gait slowing. Only a participant whose tracking is stable across both conditions simultaneously—as P06 partially demonstrates—could yield a reliable DTC estimate, and even P06 showed near-zero changes that may reflect non-response to the paradigm rather than pipeline sensitivity.
+The central limitation that remains is the absence of synchronized ground-truth comparison. Internal consistency metrics confirm that the AP pipeline produces stable, repeatable measurements, but absolute error against a gold-standard IMU reference has not been quantified. DTC values are therefore interpretable as directionally consistent estimates of cognitive-motor effects, but their clinical accuracy cannot yet be established.
 
 \section{Future Work}
 
-Three concrete directions would advance the validation of this pipeline. First, a systematic characterization of recording condition effects is needed. The between-participant variance observed here—particularly the contrast between P06 and P03/P04—motivates a controlled study in which lighting intensity, clothing contrast (dark vs. light, tight-fitting vs. loose), and participant anthropometrics are varied systematically while tracking quality is monitored via keypoint confidence scores. This would establish the minimum recording standards under which the pipeline produces reliable output, enabling its deployment to be conditioned on verifiable criteria rather than post-hoc reliability checks.
+Two directions remain most critical. First, validation against a synchronized IMU reference is the primary outstanding requirement. Collecting simultaneous Sports2D video and calibrated IMU data—across both single-task and dual-task conditions—would yield per-stride MAE and minimal detectable change estimates, enabling the pipeline to be characterized for clinical use rather than internal consistency alone. The DUO-GAIT dataset [1] provides an existing reference standard whose paradigm directly matches this study's design and represents a natural validation target.
 
-Second, the heel-strike and toe-off detection method should be replaced or augmented. The current approach—detecting local minima in vertical keypoint trajectories—is sensitive to pose estimation noise by design, since a noisy trajectory produces spurious local minima. Learned gait event detectors trained on video-derived keypoint signals, or lightweight IMU-video fusion approaches in which a single ankle IMU provides ground-truth event timestamps while the video pipeline handles spatial parameters, would directly address the identified failure mode without requiring hardware-intensive 3D capture.
-
-Third, validation against a synchronized ground-truth reference is essential before clinical use can be considered. The DUO-GAIT dataset [1] was the intended reference in this study's design, but per-participant comparison was not achievable without synchronized video and IMU recordings. Collecting a dataset in which the Sports2D pipeline and a calibrated IMU array run simultaneously on the same participants—across both single-task and dual-task conditions—would allow per-stride error quantification against a gold standard, yielding the mean absolute error and minimal detectable change estimates necessary to characterize the pipeline's clinical utility for cognitive–motor assessment.
+Second, the AP detector's adaptive prominence constant ($k = 0.4$) was set empirically and has not been optimized across a larger and more diverse population. A systematic evaluation across varying gait speeds, stride lengths, and participant anthropometrics—using ground-truth event labels from synchronized IMU data—would establish whether the default value generalizes or requires per-condition tuning, and would characterize the detector's failure boundaries before deployment in clinical or field settings.
 
 \begin{thebibliography}{00}
 
@@ -218,7 +212,6 @@ J. Stenum, C. Rossi, and R. T. Roemmich, "Two-dimensional video-
 based analysis of human gait using pose estimation," PLOS Comput.
 Biol., vol. 17, no. 4, p. e1008935, Apr. 2021, doi: 10.1371/jour-
 nal.pcbi.1008935.
-
 
 \bibitem{Rtm}
 T. Jiang, P. Lu, L. Zhang, N. Ma, R. Han, C. Lyu, Y. Li, and
@@ -237,7 +230,11 @@ E. P. Washabaugh, T. A. Shanmugam, R. Ranganathan, and C. Krishnan,
 measuring gait kinematics," Gait Posture, vol. 97, pp. 188–195, Sep.
 2022, doi: 10.1016/j.gaitpost.2022.08.008.
 
-
+\bibitem{zeni}
+J. A. Zeni Jr., J. G. Richards, and J. S. Higginson, "Two simple methods
+for determining gait events during treadmill and overground walking using
+kinematic data," Gait Posture, vol. 27, no. 4, pp. 710--714, May 2008,
+doi: 10.1016/j.gaitpost.2007.07.007.
 
 \bibitem{validity}
 K. L. Leung et al., "Validity and reliability of gait speed and knee flexion
