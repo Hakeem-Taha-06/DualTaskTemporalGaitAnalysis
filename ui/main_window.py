@@ -231,6 +231,23 @@ class InputPanel(QWidget):
         )
         row3.addWidget(self.speed_factor_spin)
         lay_num.addLayout(row3)
+
+        row4 = QHBoxLayout()
+        row4.addWidget(QLabel("AP Prominence K:"))
+        self.ap_prominence_k_spin = QDoubleSpinBox()
+        self.ap_prominence_k_spin.setRange(0.01, 5.0)
+        self.ap_prominence_k_spin.setValue(0.4)
+        self.ap_prominence_k_spin.setSingleStep(0.05)
+        self.ap_prominence_k_spin.setDecimals(2)
+        self.ap_prominence_k_spin.setToolTip(
+            "Adaptive prominence threshold for AP (heel-X / toe-X) event detection.\n"
+            "prominence = K × std(detrended signal).\n"
+            "Lower → more events detected (higher false-positive risk).\n"
+            "Higher → fewer, more confident events.\n"
+            "Default: 0.4. Try 0.2–0.3 if AP detection finds too few events."
+        )
+        row4.addWidget(self.ap_prominence_k_spin)
+        lay_num.addLayout(row4)
         root.addWidget(grp_num)
 
         # ── Boundary timestamps (optional) ────────────────────────────
@@ -428,6 +445,7 @@ class InputPanel(QWidget):
             "segment_mode":   self.segment_mode_cb.isChecked(),
             "invert_y":       self.invert_y_cb.isChecked(),
             "apply_filter":   self.smooth_cb.isChecked(),
+            "ap_prominence_k": self.ap_prominence_k_spin.value(),
         }
         if not config["st_input"] or not config["dt_input"]:
             QMessageBox.warning(self, "Missing Input", "Please provide ST and DT file paths.")
@@ -499,8 +517,22 @@ class ParameterTab(QWidget):
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self.title = title
+        self._data: dict = {}  # {"vert": df, "ap": df}
+
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(4, 4, 4, 4)
+
+        # Detector selector bar
+        det_bar = QHBoxLayout()
+        det_bar.addWidget(QLabel("Detector:"))
+        self._det_combo = QComboBox()
+        self._det_combo.addItems(["Vertical (Heel-Y)", "AP (Heel-X)"])
+        self._det_combo.currentIndexChanged.connect(self._refresh)
+        self._det_combo.setFixedWidth(180)
+        det_bar.addWidget(self._det_combo)
+        det_bar.addStretch()
+        self._layout.addLayout(det_bar)
+
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._container = QWidget()
@@ -508,14 +540,22 @@ class ParameterTab(QWidget):
         self._scroll.setWidget(self._container)
         self._layout.addWidget(self._scroll)
 
-    def load_data(self, strides_df: pd.DataFrame):
-        """Render time-series charts for each parameter, one graph per param."""
+    def load_data(self, strides_vert=None, strides_ap=None):
+        """Load both detector result sets. Accepts legacy single-arg calls."""
+        self._data = {"vert": strides_vert, "ap": strides_ap}
+        self._refresh()
+
+    def _current_detector(self) -> str:
+        return "vert" if self._det_combo.currentIndex() == 0 else "ap"
+
+    def _refresh(self):
         # Clear previous content
         while self._container_layout.count():
             child = self._container_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
 
+        strides_df = self._data.get(self._current_detector())
         if strides_df is None or strides_df.empty:
             self._container_layout.addWidget(QLabel("No data available."))
             return
@@ -606,8 +646,22 @@ class DTCTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._data: dict = {}  # {"vert": (dtc_df, summary), "ap": (dtc_df, summary)}
+
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
+
+        # Detector selector bar
+        det_bar = QHBoxLayout()
+        det_bar.addWidget(QLabel("Detector:"))
+        self._det_combo = QComboBox()
+        self._det_combo.addItems(["Vertical (Heel-Y)", "AP (Heel-X)"])
+        self._det_combo.currentIndexChanged.connect(self._refresh)
+        self._det_combo.setFixedWidth(180)
+        det_bar.addWidget(self._det_combo)
+        det_bar.addStretch()
+        lay.addLayout(det_bar)
+
         self._chart_holder = QWidget()
         self._chart_holder.setFixedHeight(320)
         lay.addWidget(self._chart_holder)
@@ -616,8 +670,23 @@ class DTCTab(QWidget):
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         lay.addWidget(self._table)
 
-    def load_data(self, dtc_df: pd.DataFrame, dtc_summary: pd.DataFrame):
+    def load_data(self, dtc_vert=None, summary_vert=None,
+                  dtc_ap=None, summary_ap=None):
+        self._data = {
+            "vert": (dtc_vert, summary_vert),
+            "ap": (dtc_ap, summary_ap),
+        }
+        self._refresh()
+
+    def _current_detector(self) -> str:
+        return "vert" if self._det_combo.currentIndex() == 0 else "ap"
+
+    def _refresh(self):
+        pair = self._data.get(self._current_detector(), (None, None))
+        dtc_df, dtc_summary = pair if pair else (None, None)
         if dtc_df is None or dtc_df.empty:
+            self._table.clear()
+            self._table.setRowCount(0)
             return
         self._render_chart(dtc_summary)
         self._render_table(dtc_summary)
@@ -691,11 +760,20 @@ class RawDataTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._data: dict = {}  # {"vert": (st_df, dt_df), "ap": (st_df, dt_df)}
+
         lay = QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
 
-        # Filter bar
+        # Detector selector + filter bar
         bar = QHBoxLayout()
+        bar.addWidget(QLabel("Detector:"))
+        self._det_combo = QComboBox()
+        self._det_combo.addItems(["Vertical (Heel-Y)", "AP (Heel-X)"])
+        self._det_combo.currentIndexChanged.connect(self._on_detector_changed)
+        self._det_combo.setFixedWidth(180)
+        bar.addWidget(self._det_combo)
+        bar.addSpacing(20)
         bar.addWidget(QLabel("Filter:"))
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("Type to filter rows by any value…")
@@ -713,14 +791,29 @@ class RawDataTab(QWidget):
 
         self._full_df: Optional[pd.DataFrame] = None
 
-    def load_data(self, strides_st: pd.DataFrame, strides_dt: pd.DataFrame):
+    def load_data(self, raw_st_vert=None, raw_dt_vert=None,
+                  raw_st_ap=None, raw_dt_ap=None):
+        self._data = {
+            "vert": (raw_st_vert, raw_dt_vert),
+            "ap": (raw_st_ap, raw_dt_ap),
+        }
+        self._on_detector_changed()
+
+    def _current_detector(self) -> str:
+        return "vert" if self._det_combo.currentIndex() == 0 else "ap"
+
+    def _on_detector_changed(self):
+        pair = self._data.get(self._current_detector(), (None, None))
+        st_df, dt_df = pair if pair else (None, None)
         dfs = []
-        for df, cond in [(strides_st, "st"), (strides_dt, "dt")]:
+        for df, cond in [(st_df, "st"), (dt_df, "dt")]:
             if df is not None and not df.empty:
                 d = df.copy()
                 d.insert(0, "condition", cond)
                 dfs.append(d)
         if not dfs:
+            self._full_df = None
+            self._table.setRowCount(0)
             return
         self._full_df = pd.concat(dfs, ignore_index=True)
         self._render(self._full_df)
@@ -949,11 +1042,13 @@ class DiagnosticsTab(QWidget):
     _VIEWS = [
         ("Heel Y  (HS events)", "heel_y", "HS", "heel_y"),
         ("Toe Y   (TO events)", "toe_y",  "TO", "toe_y"),
+        ("Heel X  (HS events — AP)", "heel_x", "HS", "heel_x"),
+        ("Toe X   (TO events — AP)", "toe_x",  "TO", "toe_x"),
     ]
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._data: dict = {}           # keyed by cond: {traj, events, raw, clean, boundaries}
+        self._data: dict = {}           # keyed by cond: {traj, events, events_ap, raw, clean, raw_ap, clean_ap, boundaries}
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
@@ -973,7 +1068,7 @@ class DiagnosticsTab(QWidget):
         for name, *_ in self._VIEWS:
             self._view_combo.addItem(name)
         self._view_combo.currentIndexChanged.connect(self._refresh)
-        self._view_combo.setFixedWidth(200)
+        self._view_combo.setFixedWidth(220)
         top.addWidget(self._view_combo)
         top.addStretch()
         lay.addLayout(top)
@@ -996,7 +1091,7 @@ class DiagnosticsTab(QWidget):
         self._stride_card = QLabel("No data")
         self._stride_card.setStyleSheet(card_style)
         self._stride_card.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self._stride_card.setMinimumWidth(320)
+        self._stride_card.setMinimumWidth(380)
         self._stride_card.setWordWrap(True)
 
         self._cards_layout.addWidget(self._event_card)
@@ -1026,12 +1121,21 @@ class DiagnosticsTab(QWidget):
         clean_strides_dt: "pd.DataFrame | None" = None,
         boundaries_csv_st: str = "",
         boundaries_csv_dt: str = "",
+        # AP detector data
+        events_ap_st: "pd.DataFrame | None" = None,
+        events_ap_dt: "pd.DataFrame | None" = None,
+        raw_strides_ap_st: "pd.DataFrame | None" = None,
+        raw_strides_ap_dt: "pd.DataFrame | None" = None,
+        clean_strides_ap_st: "pd.DataFrame | None" = None,
+        clean_strides_ap_dt: "pd.DataFrame | None" = None,
     ):
         """Load all diagnostic data. Call after pipeline finishes."""
         self._data = {}
-        for cond, traj, evts, raw, clean, bcsv in [
-            ("st", traj_st, events_st, raw_strides_st, clean_strides_st, boundaries_csv_st),
-            ("dt", traj_dt, events_dt, raw_strides_dt, clean_strides_dt, boundaries_csv_dt),
+        for cond, traj, evts, raw, clean, bcsv, evts_ap, raw_ap, clean_ap in [
+            ("st", traj_st, events_st, raw_strides_st, clean_strides_st,
+             boundaries_csv_st, events_ap_st, raw_strides_ap_st, clean_strides_ap_st),
+            ("dt", traj_dt, events_dt, raw_strides_dt, clean_strides_dt,
+             boundaries_csv_dt, events_ap_dt, raw_strides_ap_dt, clean_strides_ap_dt),
         ]:
             if traj is not None and not traj.empty:
                 self._data[cond] = {
@@ -1040,6 +1144,9 @@ class DiagnosticsTab(QWidget):
                     "raw": raw,
                     "clean": clean,
                     "boundaries_csv": bcsv,
+                    "events_ap": evts_ap,
+                    "raw_ap": raw_ap,
+                    "clean_ap": clean_ap,
                 }
         self._refresh()
 
@@ -1073,63 +1180,61 @@ class DiagnosticsTab(QWidget):
 
     def _update_cards(self, data: dict, cond: str):
         evts = data.get("events")
-        raw = data.get("raw")
+        evts_ap = data.get("events_ap")
         clean = data.get("clean")
+        clean_ap = data.get("clean_ap")
+        raw = data.get("raw")
 
-        # Event counts card
+        # Event counts card — show both detectors
         lines = [f"<b style='color:{C_ACCENT};'>Detected Events ({cond.upper()})</b><br>"]
-        if evts is not None and not evts.empty:
-            for foot, col in [("Left", C_LEFT_FOOT), ("Right", C_RIGHT_FOOT)]:
-                side = foot.lower()
-                hs = len(evts[(evts["foot"] == side) & (evts["event_type"] == "HS")])
-                to = len(evts[(evts["foot"] == side) & (evts["event_type"] == "TO")])
-                lines.append(
-                    f"<span style='color:{col};'>{foot}</span>: "
-                    f"<b>{hs}</b> HS &nbsp;&nbsp; <b>{to}</b> TO<br>"
-                )
-        else:
-            lines.append("No events detected.<br>")
+        for label, ev_df in [("Vert", evts), ("AP", evts_ap)]:
+            if ev_df is not None and not ev_df.empty:
+                lines.append(f"<b>{label}:</b> ")
+                for foot, col in [("Left", C_LEFT_FOOT), ("Right", C_RIGHT_FOOT)]:
+                    side = foot.lower()
+                    hs = len(ev_df[(ev_df["foot"] == side) & (ev_df["event_type"] == "HS")])
+                    to = len(ev_df[(ev_df["foot"] == side) & (ev_df["event_type"] == "TO")])
+                    lines.append(
+                        f"<span style='color:{col};'>{foot}</span> "
+                        f"<b>{hs}</b>HS/<b>{to}</b>TO &nbsp;"
+                    )
+                lines.append("<br>")
+            else:
+                lines.append(f"<b>{label}:</b> No events<br>")
         self._event_card.setText("".join(lines))
 
-        # Stride counts card
+        # Stride counts card — both detectors side by side
         lines = [f"<b style='color:{C_ACCENT};'>Stride Counts ({cond.upper()})</b><br>"]
+        for label, cl_df, raw_df in [("Vert", clean, raw), ("AP", clean_ap, data.get("raw_ap"))]:
+            lines.append(f"<b>{label}:</b> ")
+            if cl_df is not None and not cl_df.empty:
+                total = len(cl_df)
+                outlier = int(cl_df["is_outlier"].sum()) if "is_outlier" in cl_df.columns else 0
+                valid = total - outlier
+                valid_l = len(cl_df[(cl_df["is_outlier"] != True) & (cl_df["foot"] == "left")])
+                valid_r = len(cl_df[(cl_df["is_outlier"] != True) & (cl_df["foot"] == "right")])
+                warn_l = " <span style='color:#e05c5c;'>(!)</span>" if valid_l < 8 else ""
+                warn_r = " <span style='color:#e05c5c;'>(!)</span>" if valid_r < 8 else ""
+                lines.append(
+                    f"Total:<b>{total}</b> Out:<b>{outlier}</b> "
+                    f"Valid:<b>{valid}</b> "
+                    f"(<span style='color:{C_LEFT_FOOT};'>L:{valid_l}</span>{warn_l}/"
+                    f"<span style='color:{C_RIGHT_FOOT};'>R:{valid_r}</span>{warn_r})<br>"
+                )
+            elif raw_df is not None and not raw_df.empty:
+                lines.append(f"Raw: <b>{len(raw_df)}</b><br>")
+            else:
+                lines.append("No data<br>")
+
+        # Stride time stats (vertical only for brevity)
         if clean is not None and not clean.empty:
-            total = len(clean)
-            outlier = int(clean["is_outlier"].sum()) if "is_outlier" in clean.columns else 0
-            valid = total - outlier
-            valid_l = len(clean[(clean["is_outlier"] != True) & (clean["foot"] == "left")])
-            valid_r = len(clean[(clean["is_outlier"] != True) & (clean["foot"] == "right")])
-
-            warn_l = " <span style='color:#e05c5c;'>(!)</span>" if valid_l < 8 else ""
-            warn_r = " <span style='color:#e05c5c;'>(!)</span>" if valid_r < 8 else ""
-
-            lines.append(f"Total strides: <b>{total}</b><br>")
-            lines.append(f"Outliers removed: <b>{outlier}</b><br>")
-            lines.append(
-                f"Valid: <b>{valid}</b> &nbsp; "
-                f"(<span style='color:{C_LEFT_FOOT};'>L:{valid_l}</span>{warn_l} / "
-                f"<span style='color:{C_RIGHT_FOOT};'>R:{valid_r}</span>{warn_r})<br>"
-            )
-
-            # Removal reasons breakdown
-            if "removal_reason" in clean.columns:
-                reasons = clean[clean["is_outlier"] == True]["removal_reason"].value_counts()
-                if len(reasons) > 0:
-                    reason_str = ", ".join(f"{r}: {c}" for r, c in reasons.items())
-                    lines.append(f"<span style='color:{C_MUTED};'>Reasons: {reason_str}</span><br>")
-
-            # Stride time stats
             valid_df = clean[clean["is_outlier"] != True]
             if "stride_times" in valid_df.columns and len(valid_df) > 0:
                 st_vals = valid_df["stride_times"]
                 lines.append(
-                    f"<br>Stride time: <b>{st_vals.mean():.3f}s</b> "
+                    f"<br>Stride time (Vert): <b>{st_vals.mean():.3f}s</b> "
                     f"(range {st_vals.min():.3f} - {st_vals.max():.3f}s)"
                 )
-        elif raw is not None and not raw.empty:
-            lines.append(f"Raw strides: <b>{len(raw)}</b> (no cleaning done)<br>")
-        else:
-            lines.append("No strides computed.<br>")
 
         self._stride_card.setText("".join(lines))
 
@@ -1151,12 +1256,13 @@ class DiagnosticsTab(QWidget):
 
         traj = data["traj"]
         evts = data.get("events")
+        evts_ap = data.get("events_ap")
         boundaries = self._parse_boundary_csv(data.get("boundaries_csv", ""))
 
         if HAS_PYQTGRAPH:
-            self._pg_plot(traj, evts, boundaries, y_suffix, event_type, cond)
+            self._pg_plot(traj, evts, evts_ap, boundaries, y_suffix, event_type, cond)
         else:
-            self._mpl_plot(traj, evts, boundaries, y_suffix, event_type, cond)
+            self._mpl_plot(traj, evts, evts_ap, boundaries, y_suffix, event_type, cond)
 
     def _parse_boundary_csv(self, csv_path: str) -> list:
         """Parse boundary CSV into list of {'time_s': float, 'event': str}."""
@@ -1192,8 +1298,8 @@ class DiagnosticsTab(QWidget):
         events.sort(key=lambda e: e["time_s"])
         return events
 
-    def _pg_plot(self, traj, evts, boundaries, y_suffix, event_type, cond):
-        """Build a pyqtgraph plot widget."""
+    def _pg_plot(self, traj, evts, evts_ap, boundaries, y_suffix, event_type, cond):
+        """Build a pyqtgraph plot widget with dual-detector event overlay."""
         pw = pg.PlotWidget(
             title=f"{y_suffix.replace('_', ' ').title()} Trajectory + {event_type} Events — {cond.upper()}"
         )
@@ -1214,34 +1320,36 @@ class DiagnosticsTab(QWidget):
             pen = pg.mkPen(color=col_rgb, width=1.5)
             pw.plot(times, yvals, pen=pen, name=f"{side} {y_suffix}")
 
-        # Overlay event markers
-        if evts is not None and not evts.empty:
-            for side, col_hex, sym in [("left", C_LEFT_FOOT, "t1"), ("right", C_RIGHT_FOOT, "t")]:
+        # Helper to overlay event markers for a given event DataFrame
+        def _overlay_events(ev_df, det_label, sym, use_brush):
+            if ev_df is None or ev_df.empty:
+                return
+            for side, col_hex in [("left", C_LEFT_FOOT), ("right", C_RIGHT_FOOT)]:
                 col_name = f"{side}_{y_suffix}"
                 if col_name not in traj.columns:
                     continue
-                side_evts = evts[(evts["foot"] == side) & (evts["event_type"] == event_type)]
+                side_evts = ev_df[(ev_df["foot"] == side) & (ev_df["event_type"] == event_type)]
                 if side_evts.empty:
                     continue
                 evt_times = side_evts["time_s"].values
-                # Find closest traj Y value for each event
                 traj_times = traj["time_s"].values
                 traj_y = traj[col_name].values
-                evt_y = []
-                for et in evt_times:
-                    idx = np.argmin(np.abs(traj_times - et))
-                    evt_y.append(traj_y[idx])
-                evt_y = np.array(evt_y)
+                evt_y = np.array([traj_y[np.argmin(np.abs(traj_times - et))] for et in evt_times])
 
+                brush = pg.mkBrush(QColor(col_hex)) if use_brush else pg.mkBrush(None)
+                pen_s = pg.mkPen(None) if use_brush else pg.mkPen(QColor(col_hex), width=1.5)
                 scatter = pg.ScatterPlotItem(
                     x=evt_times, y=evt_y,
-                    brush=pg.mkBrush(QColor(col_hex)),
-                    pen=pg.mkPen(None),
-                    size=8,
-                    symbol=sym,
-                    name=f"{side} {event_type} ({len(evt_times)})",
+                    brush=brush, pen=pen_s,
+                    size=8, symbol=sym,
+                    name=f"{side} {event_type} {det_label} ({len(evt_times)})",
                 )
                 pw.addItem(scatter)
+
+        # Vertical markers: filled triangles
+        _overlay_events(evts, "Vert", "t1", use_brush=True)
+        # AP markers: hollow diamonds
+        _overlay_events(evts_ap, "AP", "d", use_brush=False)
 
         # Boundary vertical lines
         for bev in boundaries:
@@ -1259,8 +1367,8 @@ class DiagnosticsTab(QWidget):
         pw.addLegend(offset=(10, 10))
         self._plot_layout.addWidget(pw)
 
-    def _mpl_plot(self, traj, evts, boundaries, y_suffix, event_type, cond):
-        """Build a matplotlib fallback plot."""
+    def _mpl_plot(self, traj, evts, evts_ap, boundaries, y_suffix, event_type, cond):
+        """Build a matplotlib fallback plot with dual-detector event overlay."""
         fig, ax = plt.subplots(figsize=(10, 4))
         fig.patch.set_facecolor(C_SURFACE)
         ax.set_facecolor(C_BG)
@@ -1282,20 +1390,28 @@ class DiagnosticsTab(QWidget):
             ax.plot(times, traj[col_name].values, color=col, linewidth=1,
                     label=f"{side} {y_suffix}", alpha=0.8)
 
-        if evts is not None and not evts.empty:
-            for side, col, marker in [("left", C_LEFT_FOOT, "v"), ("right", C_RIGHT_FOOT, "^")]:
+        # Helper for dual overlay
+        def _scatter_events(ev_df, det_label, marker, filled):
+            if ev_df is None or ev_df.empty:
+                return
+            for side, col in [("left", C_LEFT_FOOT), ("right", C_RIGHT_FOOT)]:
                 col_name = f"{side}_{y_suffix}"
                 if col_name not in traj.columns:
                     continue
-                side_evts = evts[(evts["foot"] == side) & (evts["event_type"] == event_type)]
+                side_evts = ev_df[(ev_df["foot"] == side) & (ev_df["event_type"] == event_type)]
                 if side_evts.empty:
                     continue
                 evt_times = side_evts["time_s"].values
                 traj_times = traj["time_s"].values
                 traj_y = traj[col_name].values
                 evt_y = [traj_y[np.argmin(np.abs(traj_times - et))] for et in evt_times]
-                ax.scatter(evt_times, evt_y, color=col, marker=marker, s=40, zorder=5,
-                           label=f"{side} {event_type} ({len(evt_times)})")
+                fc = col if filled else "none"
+                ax.scatter(evt_times, evt_y, facecolors=fc, edgecolors=col,
+                           marker=marker, s=40, zorder=5,
+                           label=f"{side} {event_type} {det_label} ({len(evt_times)})")
+
+        _scatter_events(evts, "Vert", "v", filled=True)
+        _scatter_events(evts_ap, "AP", "D", filled=False)
 
         for bev in boundaries:
             color = "#5cb85c" if bev["event"] == "enter" else "#e05c5c"
@@ -1419,6 +1535,7 @@ class MainWindow(QMainWindow):
             segment_mode   = config.get("segment_mode", False),
             invert_y       = config.get("invert_y", False),
             apply_filter   = config.get("apply_filter", True),
+            ap_prominence_k = config.get("ap_prominence_k", 0.4),
         )
         self._runner.progress.connect(self._on_progress)
         self._runner.finished.connect(self._on_finished)
@@ -1443,8 +1560,14 @@ class MainWindow(QMainWindow):
 
         # Populate result tabs
         try:
-            self._st_tab.load_data(results.get("remove_outliers_st"))
-            self._dt_tab.load_data(results.get("remove_outliers_dt"))
+            self._st_tab.load_data(
+                strides_vert=results.get("remove_outliers_st"),
+                strides_ap=results.get("remove_outliers_ap_st"),
+            )
+            self._dt_tab.load_data(
+                strides_vert=results.get("remove_outliers_dt"),
+                strides_ap=results.get("remove_outliers_ap_dt"),
+            )
 
             self._diag_tab.load_data(
                 traj_st=results.get("preprocess_st"),
@@ -1457,18 +1580,29 @@ class MainWindow(QMainWindow):
                 clean_strides_dt=results.get("remove_outliers_dt"),
                 boundaries_csv_st=self._runner.st_boundaries_csv if self._runner else "",
                 boundaries_csv_dt=self._runner.dt_boundaries_csv if self._runner else "",
+                # AP detector data
+                events_ap_st=results.get("detect_events_ap_st"),
+                events_ap_dt=results.get("detect_events_ap_dt"),
+                raw_strides_ap_st=results.get("calc_params_ap_st"),
+                raw_strides_ap_dt=results.get("calc_params_ap_dt"),
+                clean_strides_ap_st=results.get("remove_outliers_ap_st"),
+                clean_strides_ap_dt=results.get("remove_outliers_ap_dt"),
             )
 
             dtc_payload = results.get("dtc", {})
-            if isinstance(dtc_payload, dict):
-                self._dtc_tab.load_data(
-                    dtc_payload.get("dtc"),
-                    dtc_payload.get("dtc_summary"),
-                )
+            dtc_ap_payload = results.get("dtc_ap", {})
+            self._dtc_tab.load_data(
+                dtc_vert=dtc_payload.get("dtc") if isinstance(dtc_payload, dict) else None,
+                summary_vert=dtc_payload.get("dtc_summary") if isinstance(dtc_payload, dict) else None,
+                dtc_ap=dtc_ap_payload.get("dtc") if isinstance(dtc_ap_payload, dict) else None,
+                summary_ap=dtc_ap_payload.get("dtc_summary") if isinstance(dtc_ap_payload, dict) else None,
+            )
 
             self._raw_tab.load_data(
-                results.get("calc_params_st"),
-                results.get("calc_params_dt"),
+                raw_st_vert=results.get("calc_params_st"),
+                raw_dt_vert=results.get("calc_params_dt"),
+                raw_st_ap=results.get("calc_params_ap_st"),
+                raw_dt_ap=results.get("calc_params_ap_dt"),
             )
 
             # Load annotated videos if available
@@ -1540,7 +1674,7 @@ class MainWindow(QMainWindow):
         elif run_cfg.get("dt_boundaries_csv"):
             boundaries_dt = run_cfg["dt_boundaries_csv"]
 
-        # Read all output CSVs
+        # Read all output CSVs — vertical detector
         traj_st       = _read_csv("01_raw_trajectories_st.csv")
         traj_dt       = _read_csv("01_raw_trajectories_dt.csv")
         events_st     = _read_csv("02_events_st.csv")
@@ -1554,6 +1688,16 @@ class MainWindow(QMainWindow):
         dtc_df        = _read_csv("06_dtc.csv")
         dtc_summary   = _read_csv("07_dtc_summary.csv")
 
+        # Read AP detector CSVs (may not exist for older runs)
+        events_ap_st     = _read_csv("02_events_ap_st.csv")
+        events_ap_dt     = _read_csv("02_events_ap_dt.csv")
+        strides_raw_ap_st = _read_csv("03_strides_raw_ap_st.csv")
+        strides_raw_ap_dt = _read_csv("03_strides_raw_ap_dt.csv")
+        strides_clean_ap_st = _read_csv("04_strides_cleaned_ap_st.csv")
+        strides_clean_ap_dt = _read_csv("04_strides_cleaned_ap_dt.csv")
+        dtc_ap_df        = _read_csv("06_dtc_ap.csv")
+        dtc_ap_summary   = _read_csv("07_dtc_summary_ap.csv")
+
         # Apply the same preprocessing (Y-axis correction + smoothing) as the live pipeline
         from gait import preprocessor
         invert_y = run_cfg.get("invert_y", False)
@@ -1564,9 +1708,15 @@ class MainWindow(QMainWindow):
         if traj_dt is not None and not traj_dt.empty:
             traj_dt = preprocessor.preprocess(traj_dt, fps=fps, force_invert_y=invert_y, apply_filter=apply_filter)
 
-        # Populate tabs
-        self._st_tab.load_data(strides_clean_st)
-        self._dt_tab.load_data(strides_clean_dt)
+        # Populate tabs — both detectors
+        self._st_tab.load_data(
+            strides_vert=strides_clean_st,
+            strides_ap=strides_clean_ap_st,
+        )
+        self._dt_tab.load_data(
+            strides_vert=strides_clean_dt,
+            strides_ap=strides_clean_ap_dt,
+        )
 
         self._diag_tab.load_data(
             traj_st=traj_st,
@@ -1579,12 +1729,27 @@ class MainWindow(QMainWindow):
             clean_strides_dt=strides_clean_dt,
             boundaries_csv_st=boundaries_st,
             boundaries_csv_dt=boundaries_dt,
+            events_ap_st=events_ap_st,
+            events_ap_dt=events_ap_dt,
+            raw_strides_ap_st=strides_raw_ap_st,
+            raw_strides_ap_dt=strides_raw_ap_dt,
+            clean_strides_ap_st=strides_clean_ap_st,
+            clean_strides_ap_dt=strides_clean_ap_dt,
         )
 
-        if dtc_df is not None and dtc_summary is not None:
-            self._dtc_tab.load_data(dtc_df, dtc_summary)
+        self._dtc_tab.load_data(
+            dtc_vert=dtc_df,
+            summary_vert=dtc_summary,
+            dtc_ap=dtc_ap_df,
+            summary_ap=dtc_ap_summary,
+        )
 
-        self._raw_tab.load_data(strides_raw_st, strides_raw_dt)
+        self._raw_tab.load_data(
+            raw_st_vert=strides_raw_st,
+            raw_dt_vert=strides_raw_dt,
+            raw_st_ap=strides_raw_ap_st,
+            raw_dt_ap=strides_raw_ap_dt,
+        )
 
         # Switch to diagnostics tab
         self._tabs.setCurrentWidget(self._diag_tab)
@@ -1668,6 +1833,7 @@ class MainWindow(QMainWindow):
             "segment_mode":      False,
             "invert_y":          run_cfg.get("invert_y", False),
             "apply_filter":      run_cfg.get("apply_filter", True),
+            "ap_prominence_k":   self._input_panel.ap_prominence_k_spin.value(),
         }
 
         self.setWindowTitle(f"Gait Analysis — {config['participant_id']} (rerunning…)")

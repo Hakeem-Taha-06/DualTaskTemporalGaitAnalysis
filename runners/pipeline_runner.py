@@ -126,6 +126,7 @@ class PipelineRunner(QThread):
         save_video: bool = False,
         segment_mode: bool = False,
         invert_y: bool = False,
+        ap_prominence_k: float = 0.4,
         parent=None,
     ):
         super().__init__(parent)
@@ -145,6 +146,7 @@ class PipelineRunner(QThread):
         self.save_video        = save_video
         self.segment_mode      = segment_mode
         self.invert_y          = invert_y
+        self.ap_prominence_k   = ap_prominence_k
 
         self._stages = self._build_stage_graph()
         self._results: dict = {}
@@ -163,6 +165,7 @@ class PipelineRunner(QThread):
             PipelineStage("load_dt",            ["sports2d_dt"]),
             PipelineStage("preprocess_st",      ["load_st"]),
             PipelineStage("preprocess_dt",      ["load_dt"]),
+            # Vertical detector branch
             PipelineStage("detect_events_st",   ["preprocess_st"]),
             PipelineStage("detect_events_dt",   ["preprocess_dt"]),
             PipelineStage("calc_params_st",     ["detect_events_st"]),
@@ -172,6 +175,16 @@ class PipelineRunner(QThread):
             PipelineStage("aggregate_st",       ["remove_outliers_st"]),
             PipelineStage("aggregate_dt",       ["remove_outliers_dt"]),
             PipelineStage("dtc",               ["aggregate_st", "aggregate_dt"]),
+            # AP detector branch (shares preprocess_st/dt)
+            PipelineStage("detect_events_ap_st",   ["preprocess_st"]),
+            PipelineStage("detect_events_ap_dt",   ["preprocess_dt"]),
+            PipelineStage("calc_params_ap_st",     ["detect_events_ap_st"]),
+            PipelineStage("calc_params_ap_dt",     ["detect_events_ap_dt"]),
+            PipelineStage("remove_outliers_ap_st", ["calc_params_ap_st"]),
+            PipelineStage("remove_outliers_ap_dt", ["calc_params_ap_dt"]),
+            PipelineStage("aggregate_ap_st",       ["remove_outliers_ap_st"]),
+            PipelineStage("aggregate_ap_dt",       ["remove_outliers_ap_dt"]),
+            PipelineStage("dtc_ap",               ["aggregate_ap_st", "aggregate_ap_dt"]),
         ]
         return {s.name: s for s in stages}
 
@@ -187,16 +200,23 @@ class PipelineRunner(QThread):
             if not self.dt_is_video:
                 self._stages["sports2d_dt"].status = StageStatus.SKIPPED
 
-            # Execution order matches Addendum 2 stage list
+            # Execution order: vertical detector branch first, then AP branch
             order = [
                 "sports2d_st", "sports2d_dt",
                 "load_st",     "load_dt",
                 "preprocess_st", "preprocess_dt",
+                # Vertical detector branch
                 "detect_events_st", "detect_events_dt",
                 "calc_params_st", "calc_params_dt",
                 "remove_outliers_st", "remove_outliers_dt",
                 "aggregate_st", "aggregate_dt",
                 "dtc",
+                # AP detector branch
+                "detect_events_ap_st", "detect_events_ap_dt",
+                "calc_params_ap_st", "calc_params_ap_dt",
+                "remove_outliers_ap_st", "remove_outliers_ap_dt",
+                "aggregate_ap_st", "aggregate_ap_dt",
+                "dtc_ap",
             ]
             total = len(order)
 
@@ -394,8 +414,115 @@ class PipelineRunner(QThread):
             dtc_sum = dtc_calculator.dtc_summary_table(dtc_df)
             dtc_df.to_csv(out / "06_dtc.csv",         index=False)
             dtc_sum.to_csv(out / "07_dtc_summary.csv", index=False)
+            return {"dtc": dtc_df, "dtc_summary": dtc_sum}
 
-            # Save run metadata & boundary copies for the Load Results feature
+        # ══════════════════════════════════════════════════════════════
+        # AP detector branch — mirrors the vertical branch above but
+        # calls event_detector.detect_events_ap() and stores results
+        # under "*_ap_*" keys with "_ap" CSV suffixes.
+        # ══════════════════════════════════════════════════════════════
+
+        # ── AP Event detection ─────────────────────────────────────────
+        if name == "detect_events_ap_st":
+            df = event_detector.detect_events_ap(
+                self._results["preprocess_st"],
+                fps=self._get_fps("st"),
+                speed_factor=self.speed_factor,
+                prominence_k=self.ap_prominence_k,
+                boundaries_csv=self.st_boundaries_csv,
+            )
+            df.to_csv(out / "02_events_ap_st.csv", index=False)
+            return df
+
+        if name == "detect_events_ap_dt":
+            df = event_detector.detect_events_ap(
+                self._results["preprocess_dt"],
+                fps=self._get_fps("dt"),
+                speed_factor=self.speed_factor,
+                prominence_k=self.ap_prominence_k,
+                boundaries_csv=self.dt_boundaries_csv,
+            )
+            df.to_csv(out / "02_events_ap_dt.csv", index=False)
+            return df
+
+        # ── AP Parameter calculation ───────────────────────────────────
+        if name == "calc_params_ap_st":
+            gait_ev = event_detector.events_to_gait_event_dict(
+                self._results["detect_events_ap_st"]
+            )
+            self._results["gait_events_ap_st"] = gait_ev
+            df = parameter_calculator.calculate_parameters(
+                gait_ev, self._results["preprocess_st"]
+            )
+            df = self._apply_speed_factor(df)
+            df = parameter_calculator.flag_outliers(df)
+            df.to_csv(out / "03_strides_raw_ap_st.csv", index=False)
+            return df
+
+        if name == "calc_params_ap_dt":
+            gait_ev = event_detector.events_to_gait_event_dict(
+                self._results["detect_events_ap_dt"]
+            )
+            self._results["gait_events_ap_dt"] = gait_ev
+            df = parameter_calculator.calculate_parameters(
+                gait_ev, self._results["preprocess_dt"]
+            )
+            df = self._apply_speed_factor(df)
+            df = parameter_calculator.flag_outliers(df)
+            df.to_csv(out / "03_strides_raw_ap_dt.csv", index=False)
+            return df
+
+        # ── AP Outlier removal ─────────────────────────────────────────
+        if name == "remove_outliers_ap_st":
+            df = outlier_remover.remove_outliers(
+                self._results["calc_params_ap_st"],
+                self._results["preprocess_st"],
+                boundaries_csv=self.st_boundaries_csv,
+                speed_factor=self.speed_factor,
+            )
+            df.to_csv(out / "04_strides_cleaned_ap_st.csv", index=False)
+            return df
+
+        if name == "remove_outliers_ap_dt":
+            df = outlier_remover.remove_outliers(
+                self._results["calc_params_ap_dt"],
+                self._results["preprocess_dt"],
+                boundaries_csv=self.dt_boundaries_csv,
+                speed_factor=self.speed_factor,
+            )
+            df.to_csv(out / "04_strides_cleaned_ap_dt.csv", index=False)
+            return df
+
+        # ── AP Aggregation ─────────────────────────────────────────────
+        if name == "aggregate_ap_st":
+            df = aggregator.aggregate(
+                self._results["remove_outliers_ap_st"],
+                participant_id=self.participant_id,
+                condition="st",
+            )
+            df.to_csv(out / "05_aggregated_ap_st.csv", index=False)
+            return df
+
+        if name == "aggregate_ap_dt":
+            df = aggregator.aggregate(
+                self._results["remove_outliers_ap_dt"],
+                participant_id=self.participant_id,
+                condition="dt",
+            )
+            df.to_csv(out / "05_aggregated_ap_dt.csv", index=False)
+            return df
+
+        # ── AP DTC ─────────────────────────────────────────────────────
+        if name == "dtc_ap":
+            dtc_df  = dtc_calculator.calculate_dtc(
+                self._results["aggregate_ap_st"],
+                self._results["aggregate_ap_dt"],
+            )
+            dtc_sum = dtc_calculator.dtc_summary_table(dtc_df)
+            dtc_df.to_csv(out / "06_dtc_ap.csv",         index=False)
+            dtc_sum.to_csv(out / "07_dtc_summary_ap.csv", index=False)
+
+            # Save run metadata & boundary copies — last stage in the pipeline
             self._save_run_metadata(out)
 
             return {"dtc": dtc_df, "dtc_summary": dtc_sum}
@@ -427,6 +554,7 @@ class PipelineRunner(QThread):
             "height_m": self.height_m,
             "st_boundaries_csv": self.st_boundaries_csv,
             "dt_boundaries_csv": self.dt_boundaries_csv,
+            "ap_prominence_k": self.ap_prominence_k,
         }
         config_path = out / "_run_config.json"
         config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
